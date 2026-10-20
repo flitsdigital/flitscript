@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { PRESETS } from "../src/captions/presets";
 import { apply } from "../src/project/commands";
 import type { Project, Word } from "../src/project/types";
-import { buildPrompt, validateRefinement, type RefineInput } from "./refine";
+import type { RefineInput } from "../src/project/types";
+import { buildPrompt, validateRefinement } from "./refine";
 
 const texts = ["Heb", "je", "nou", "ook", "een", "truck", "vraag?", "Ad", "blu", "is", "geen", "brandstof."];
 const words: Word[] = texts.map((text, i) => ({ id: `w${i}`, text, start: i * 0.4, end: i * 0.4 + 0.3, confidence: 0.9, speaker: null }));

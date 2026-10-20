@@ -4,7 +4,7 @@ import { BUILT_IN_FONTS } from "./font-catalog";
 export type FontFamily = { family: string; weights: number[]; custom: boolean };
 type Source = string | ArrayBuffer;
 
-// shortcut: uploaded fonts live in memory for this session; fase 6 stores them per client in Supabase.
+// Uploaded fonts are kept here for this session; Supabase storage keeps them per client (see Editor).
 const custom = new Map<string, ArrayBuffer>();
 const loaded = new Map<string, Promise<void>>();
 const listeners = new Set<() => void>();

@@ -1,6 +1,7 @@
 import { Check, Download, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { fontSource } from "../captions/fonts";
+import { usedFonts } from "../captions/style";
 import { containerFor, startExport, supportedCodecs, type VideoCodecChoice } from "../export/export";
 import { toSrt, toVtt } from "../export/subtitles";
 import type { VideoMeta } from "../media/probe";
@@ -77,13 +78,12 @@ export function ExportDialog({ file, meta, project, onClose }: Props) {
       return; // picker dismissed
     }
     const startedAt = performance.now();
-    let finished = false;
     const job = startExport(
       {
         file,
         handle,
         project,
-        fonts: [fontSource(project.style.font.family, project.style.font.weight)],
+        fonts: usedFonts(project).map((f) => fontSource(f.family, f.weight)),
         width: meta.width,
         height: meta.height,
         codec,
@@ -97,7 +97,6 @@ export function ExportDialog({ file, meta, project, onClose }: Props) {
     setState({ kind: "running", progress: 0, startedAt, cancel: job.cancel });
     try {
       const result = await job.done;
-      finished = result === "done";
       if (result === "done") {
         const written = await handle.getFile();
         setState({ kind: "done", name: written.name, size: written.size, seconds: (performance.now() - startedAt) / 1000 });
@@ -109,8 +108,6 @@ export function ExportDialog({ file, meta, project, onClose }: Props) {
     } finally {
       cancelRef.current = null;
     }
-    // A cancelled or failed export must not leave a broken file behind (the picker already created it).
-    if (!finished) await (handle as FileSystemFileHandle & { remove?: () => Promise<void> }).remove?.().catch(() => {});
   }
 
   const elapsed = running ? (performance.now() - state.startedAt) / 1000 : 0;
@@ -123,8 +120,8 @@ export function ExportDialog({ file, meta, project, onClose }: Props) {
   ];
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-neutral-900/40 backdrop-blur-[2px]" onClick={() => !running && onClose()}>
-      <div className="w-[30rem] overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+    <div className="enter-fade fixed inset-0 z-30 flex items-center justify-center bg-neutral-900/40 backdrop-blur-[2px]" onClick={() => !running && onClose()}>
+      <div className="enter-pop w-[30rem] overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <header className="flex items-center justify-between border-b border-neutral-100 px-5 py-4">
           <h2 className="text-[17px] font-semibold">Video exporteren</h2>
           <IconButton label="Sluiten" disabled={running} onClick={onClose}>
@@ -184,12 +181,12 @@ export function ExportDialog({ file, meta, project, onClose }: Props) {
             </div>
           )}
           {state.kind === "done" && (
-            <p className="flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-green-800">
-              <Check size={15} /> {state.name} ({formatBytes(state.size)}) klaar in {Math.round(state.seconds)} s
+            <p className="enter flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-green-800">
+              <Check size={15} className="enter-tick" /> {state.name} ({formatBytes(state.size)}) klaar in {Math.round(state.seconds)} s
             </p>
           )}
           {state.kind === "canceled" && <p className="text-neutral-500">Export geannuleerd.</p>}
-          {state.kind === "error" && <p className="rounded-lg bg-red-50 px-3 py-2 text-red-700">Export mislukt: {state.message}</p>}
+          {state.kind === "error" && <p className="enter rounded-lg bg-red-50 px-3 py-2 text-red-700">Export mislukt: {state.message}</p>}
         </div>
 
         <footer className="flex items-center gap-2 border-t border-neutral-100 bg-neutral-50 px-5 py-3">

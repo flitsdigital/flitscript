@@ -16,12 +16,16 @@ self.onmessage = async (event: MessageEvent<ExportRequest | { type: "cancel" }>)
     await conversion?.cancel();
     return;
   }
+  let file: FileSystemWritableFileStream | null = null;
   try {
-    await run(event.data, await event.data.handle.createWritable());
+    file = await event.data.handle.createWritable();
+    await run(event.data, file);
     post({ type: "done" });
   } catch (error) {
-    // Cancelling closes the stream through `fileSink`, which discards the file instead of committing it.
-    await output?.cancel().catch(() => {});
+    // Once Mediabunny owns the stream, cancelling closes it through `fileSink`, which discards instead of committing.
+    // Before that (a font that won't load) the stream is still ours to abort.
+    if (output) await output.cancel().catch(() => {});
+    else await file?.abort().catch(() => {});
     if (canceled || error instanceof ConversionCanceledError) post({ type: "canceled" });
     else post({ type: "error", message: error instanceof Error ? error.message : String(error) });
   }

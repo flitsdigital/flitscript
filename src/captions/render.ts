@@ -1,23 +1,15 @@
+import { groupWords } from "../project/model";
 import type { CaptionGroup, Project, StylePreset, Word } from "../project/types";
 import { findActiveIndex } from "../project/timing";
 import { ANIMATIONS, exitOpacity, type AnimGroup } from "./animations";
 import { layoutGroup, type GroupLayout, type Size } from "./layout";
+import { effectiveStyle } from "./style";
 
 export type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 export type Rect = { x: number; y: number; width: number; height: number };
 
 const fontString = (style: StylePreset, size: number) => `${style.font.weight} ${size}px "${style.font.family}"`;
 
-/** The project style with the block's own exceptions applied. */
-export const effectiveStyle = (style: StylePreset, group: CaptionGroup): StylePreset =>
-  group.override?.style ? { ...style, ...group.override.style } : style;
-
-const wordIndexes = new WeakMap<readonly Word[], Map<string, Word>>();
-function wordIndex(words: readonly Word[]): Map<string, Word> {
-  let index = wordIndexes.get(words);
-  if (!index) wordIndexes.set(words, (index = new Map(words.map((w) => [w.id, w]))));
-  return index;
-}
 
 // Measuring text is the expensive part, so each group keeps its last layout until text, style or size changes.
 const layouts = new WeakMap<CaptionGroup, { key: string; layout: GroupLayout }>();
@@ -39,8 +31,7 @@ function resolve(ctx: Ctx2D, time: number, project: Project, size: Size) {
   const group = project.groups[index];
   if (!group) return null;
   const style = effectiveStyle(project.style, group);
-  const byId = wordIndex(project.words);
-  const words = group.wordIds.map((id) => byId.get(id)).filter((w): w is Word => w !== undefined);
+  const words = groupWords(project.words, group);
   if (!words.length) return null;
   const nextStart = project.groups[index + 1]?.start ?? Infinity;
   return { group, style, words, nextStart, layout: cachedLayout(ctx, group, words, style, size) };

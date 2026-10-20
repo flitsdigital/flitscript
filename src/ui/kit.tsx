@@ -19,7 +19,7 @@ export function Button({
   return (
     <button
       type="button"
-      className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-3 font-medium whitespace-nowrap transition-colors disabled:pointer-events-none disabled:opacity-40 ${VARIANTS[variant]} ${className}`}
+      className={`press inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-3 font-medium whitespace-nowrap disabled:pointer-events-none disabled:opacity-40 ${VARIANTS[variant]} ${className}`}
       {...props}
     >
       {icon}
@@ -34,7 +34,7 @@ export function IconButton({ label, className = "", children, ...props }: Button
       type="button"
       title={label}
       aria-label={label}
-      className={`inline-flex size-8 items-center justify-center rounded-lg text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-ink disabled:pointer-events-none disabled:opacity-35 ${className}`}
+      className={`press inline-flex size-8 items-center justify-center rounded-lg text-neutral-600 hover:bg-neutral-100 hover:text-ink disabled:pointer-events-none disabled:opacity-35 ${className}`}
       {...props}
     >
       {children}

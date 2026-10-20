@@ -1,6 +1,5 @@
-import type { Refinement } from "../../server/refine";
 import { authHeaders } from "../lib/supabase";
-import type { Project } from "../project/types";
+import type { Project, Refinement } from "../project/types";
 
 /** Sends the current transcript through the Claude correction pass. Throws with a Dutch message on failure. */
 export async function requestRefinement(project: Project, glossary: string[]): Promise<Refinement> {

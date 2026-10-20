@@ -3,10 +3,10 @@ import { Film, LoaderCircle, LogOut, Plus, Trash, Upload } from "lucide-react";
 import { useEffect, useState, type DragEvent } from "react";
 import { PRESETS } from "../captions/presets";
 import { supabase } from "../lib/supabase";
-import { fileFromHandle, forgetHandle, loadHandle, pickVideo, saveHandle } from "../media/file-handles";
-import { fingerprint, fingerprintMismatches } from "../media/fingerprint";
-import { probe, ProbeError, type VideoMeta } from "../media/probe";
-import { createClient, createProject, deleteProject, listClients, listProjects, loadProject, updateProject, type Client, type ProjectSummary } from "../project/store";
+import { fileFromHandle, forgetHandle, loadHandle, pickVideo } from "../media/file-handles";
+import type { VideoMeta } from "../media/probe";
+import { linkSourceVideo, readSourceVideo, sourceMismatches } from "../project/source-video";
+import { createClient, createProject, deleteProject, listClients, listProjects, loadProject, type Client, type ProjectSummary } from "../project/store";
 import type { Project } from "../project/types";
 import { formatTime } from "./format";
 import { Button, fieldClass, IconButton } from "./kit";
@@ -55,7 +55,7 @@ export function Home({ session, onOpen }: { session: Session; onOpen: (project: 
     try {
       await fn();
     } catch (e) {
-      setError(e instanceof ProbeError || e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
@@ -64,23 +64,21 @@ export function Home({ session, onOpen }: { session: Session; onOpen: (project: 
   /** New project from a local file: only metadata and an empty caption set go to Supabase, never the video. */
   const startNew = (file: File, handle: FileSystemFileHandle | null) =>
     guard("Video analyseren…", async () => {
-      const meta = await probe(file);
+      const video = await readSourceVideo(file);
       const data: Project = { words: [], groups: [], style: PRESETS[0]! };
       const name = file.name.replace(/\.[^.]+$/, "");
-      const { id } = await createProject({ client_id: client?.id ?? null, name, fingerprint: await fingerprint(file, meta.duration), video_meta: meta, data });
-      if (handle) await saveHandle(id, handle);
-      onOpen({ id, name, client, file, meta, data });
+      const { id } = await createProject({ client_id: client?.id ?? null, name, fingerprint: video.fingerprint, video_meta: video.meta, data });
+      await linkSourceVideo(id, video, handle, { recorded: true });
+      onOpen({ id, name, client, file, meta: video.meta, data });
     });
 
   async function finishOpen(summary: ProjectSummary, file: File, handle: FileSystemFileHandle) {
-    const meta = await probe(file);
-    const actual = await fingerprint(file, meta.duration);
-    const reasons = fingerprintMismatches(summary.fingerprint, actual);
+    const video = await readSourceVideo(file);
+    const reasons = sourceMismatches(summary.fingerprint, video);
     if (reasons.length && !confirm(`Dit lijkt niet het bronbestand van "${summary.name}": ${reasons.join(", ")}.\n\nToch openen met dit bestand?`)) return;
     const row = await loadProject(summary.id);
-    if (reasons.length) await updateProject(row.id, { fingerprint: actual, video_meta: meta });
-    await saveHandle(row.id, handle);
-    onOpen({ id: row.id, name: row.name, client: clients.find((c) => c.id === row.client_id) ?? null, file, meta, data: row.data });
+    await linkSourceVideo(row.id, video, handle, { recorded: !reasons.length });
+    onOpen({ id: row.id, name: row.name, client: clients.find((c) => c.id === row.client_id) ?? null, file, meta: video.meta, data: row.data });
   }
 
   // Both the permission request and the file picker need this click's user activation, so nothing slow runs before them.
@@ -203,9 +201,9 @@ export function Home({ session, onOpen }: { session: Session; onOpen: (project: 
             </span>
           </span>
         </button>
-        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-red-700">{error}</p>}
+        {error && <p className="enter rounded-lg bg-red-50 px-3 py-2 text-red-700">{error}</p>}
         {needsFile && (
-          <div className="flex items-center gap-3 rounded-xl bg-flits-soft px-4 py-3">
+          <div className="enter flex items-center gap-3 rounded-xl bg-flits-soft px-4 py-3">
             <span className="flex-1">
               Kies het bronbestand van <strong>{needsFile.name}</strong> ({needsFile.fingerprint.name}). Het staat niet meer op de bekende plek, of de
               browser vraagt opnieuw om toegang.

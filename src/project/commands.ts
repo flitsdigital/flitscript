@@ -1,6 +1,7 @@
-import type { Refinement } from "../../server/refine";
 import { autoAccents, pickAccent, segmentWords } from "../captions/segment";
-import type { CaptionGroup, Project, StylePreset, Word } from "./types";
+import { mergeStyle } from "../captions/style";
+import { groupWords, MIN_DURATION, normalize, wordIndex } from "./model";
+import type { CaptionGroup, Project, Refinement, StyleOverride, StylePreset, Word } from "./types";
 
 export type Command =
   /** `maxEnd` (video duration) keeps the last caption, and its fade-out, inside the video. */
@@ -17,7 +18,7 @@ export type Command =
   /** New caption at `time`; `id` comes from `newGroupId` so the UI can select it right away. */
   | { type: "addGroup"; id: string; time: number; maxEnd: number }
   /** Per-block style exceptions; `null` removes them. */
-  | { type: "setGroupStyle"; groupId: string; style: Partial<StylePreset> | null }
+  | { type: "setGroupStyle"; groupId: string; style: StyleOverride | null }
   | { type: "removeFillers" }
   | { type: "replaceWord"; find: string; replace: string };
 
@@ -38,10 +39,19 @@ export function findMatches(words: readonly Word[], find: string): Word[] {
 
 export const newGroupId = (project: Project) => nextId("g", project.groups.map((g) => g.id));
 
+export type StyleScope = "all" | "group";
+
+/** A style change from the editor: for every caption, or as an exception on one block. `gesture` keeps a drag one undo step. */
+export function styleCommand(project: Project, scope: StyleScope, groupId: string, patch: StyleOverride, gesture?: string): { command: Command; gesture?: string } {
+  return scope === "group"
+    ? { command: { type: "setGroupStyle", groupId, style: patch }, gesture: gesture && `group:${groupId}:${gesture}` }
+    : { command: { type: "setStyle", style: mergeStyle(project.style, patch) }, gesture: gesture && `style:${gesture}` };
+}
+
 function applyRefinement(project: Project, r: Refinement): Project {
   const text = new Map(r.corrections.map((c) => [c.wordId, c.text]));
   const dropped = new Set<string>();
-  const index = new Map(project.words.map((w) => [w.id, w]));
+  const index = wordIndex(project.words);
   const mergedInto = new Map<string, Word>();
   for (const m of r.merges) {
     const parts = m.wordIds.map((id) => index.get(id)).filter((w): w is Word => !!w);
@@ -55,14 +65,11 @@ function applyRefinement(project: Project, r: Refinement): Project {
     .map((w) => mergedInto.get(w.id) ?? (text.has(w.id) ? { ...w, text: text.get(w.id)! } : w));
   const accents = new Map(r.accents.map((a) => [a.groupId, a.wordIds]));
   const groups = project.groups.map((g) => {
-    const wordIds = g.wordIds.filter((id) => !dropped.has(id));
-    const chosen = accents.get(g.id)?.filter((id) => wordIds.includes(id));
-    return { ...g, wordIds, accentWordIds: chosen?.length ? chosen : g.accentWordIds.filter((id) => wordIds.includes(id)) };
+    const chosen = accents.get(g.id)?.filter((id) => g.wordIds.includes(id) && !dropped.has(id));
+    return chosen?.length ? { ...g, accentWordIds: chosen } : g;
   });
   return { ...project, words, groups };
 }
-
-const MIN_DURATION = 0.1;
 
 /** Next free id like `g12`, so commands stay deterministic. */
 function nextId(prefix: string, used: Iterable<string>, offset = 0): string {
@@ -74,20 +81,26 @@ function nextId(prefix: string, used: Iterable<string>, offset = 0): string {
 const limitsChanged = (a: StylePreset, b: StylePreset) =>
   a.maxWordsPerGroup !== b.maxWordsPerGroup || a.maxCharsPerLine !== b.maxCharsPerLine || a.maxLines !== b.maxLines;
 
-/** Re-cuts the words that are still captioned, keeping the user's accent choices where they survive. */
+/** Cuts words into blocks with ids the project never used, so a selection can't silently move to another block. */
+function segmentFresh(project: Project, words: Word[], style: StylePreset): CaptionGroup[] {
+  const used = project.groups.map((g) => g.id);
+  return segmentWords(words, style).map((g, i) => ({ ...g, id: nextId("g", used, i) }));
+}
+
+/** Re-cuts the blocks; accent choices and per-block styles carry over from the block that held the same words. */
 function resegment(project: Project, style: StylePreset): CaptionGroup[] {
-  const captioned = new Set(project.groups.flatMap((g) => g.wordIds));
   const accents = new Set(project.groups.flatMap((g) => g.accentWordIds));
-  return segmentWords(project.words.filter((w) => captioned.has(w.id)), style).map((g) => {
+  const owner = new Map(project.groups.flatMap((g) => g.wordIds.map((id) => [id, g] as const)));
+  return segmentFresh(project, project.words, style).map((g) => {
     const kept = g.wordIds.filter((id) => accents.has(id));
-    return kept.length ? { ...g, accentWordIds: kept } : g;
+    const override = owner.get(g.wordIds[0]!)?.override;
+    return { ...g, ...(kept.length > 0 && { accentWordIds: kept }), ...(override && { override }) };
   });
 }
 
 /** Re-picks every block's accent for a new automatic accent rate, keeping the blocks themselves. */
 function reaccent(project: Project, rate: number): CaptionGroup[] {
-  const index = new Map(project.words.map((w) => [w.id, w]));
-  const picks = autoAccents(project.groups.map((g) => g.wordIds.map((id) => index.get(id)!)), rate);
+  const picks = autoAccents(project.groups.map((g) => groupWords(project.words, g)), rate);
   return project.groups.map((g, i) => ({ ...g, accentWordIds: picks[i]! }));
 }
 
@@ -108,9 +121,7 @@ function retimeGroup(project: Project, groupId: string, wantStart: number, wantE
   const k = (end - start) / (g.end - g.start);
   const map = (t: number) => Math.min(Math.max(start + (t - g.start) * k, start), end);
   const ids = new Set(g.wordIds);
-  const words = project.words
-    .map((w) => (ids.has(w.id) ? { ...w, start: map(w.start), end: map(w.end) } : w))
-    .sort((a, b) => a.start - b.start);
+  const words = project.words.map((w) => (ids.has(w.id) ? { ...w, start: map(w.start), end: map(w.end) } : w));
   const groups = [...project.groups];
   groups[i] = { ...g, start, end };
   return { ...project, words, groups };
@@ -130,8 +141,7 @@ function addGroup(project: Project, id: string, time: number, maxEnd: number): P
     confidence: 1,
     speaker: null,
   }));
-  // Words of deleted blocks stay in the list, so sort instead of splicing to keep it in time order.
-  const words = [...project.words, ...fresh].sort((a, b) => a.start - b.start);
+  const words = [...project.words, ...fresh];
   const groups = [...project.groups];
   const gi = groups.findIndex((g) => g.start > time);
   groups.splice(gi < 0 ? groups.length : gi, 0, { id, wordIds: fresh.map((w) => w.id), start: time, end, accentWordIds: [] });
@@ -141,13 +151,7 @@ function addGroup(project: Project, id: string, time: number, maxEnd: number): P
 function removeFillers(project: Project): Project {
   const fillers = new Set(project.words.filter((w) => isFiller(w.text)).map((w) => w.id));
   if (!fillers.size) return project;
-  return {
-    ...project,
-    words: project.words.filter((w) => !fillers.has(w.id)),
-    groups: project.groups
-      .map((g) => ({ ...g, wordIds: g.wordIds.filter((id) => !fillers.has(id)), accentWordIds: g.accentWordIds.filter((id) => !fillers.has(id)) }))
-      .filter((g) => g.wordIds.length > 0),
-  };
+  return { ...project, words: project.words.filter((w) => !fillers.has(w.id)) };
 }
 
 function replaceWord(project: Project, find: string, replace: string): Project {
@@ -177,8 +181,8 @@ function editGroupText(project: Project, groupId: string, text: string): Project
   if (!group) return project;
   const tokens = text.trim().split(/\s+/).filter(Boolean);
   if (!tokens.length) return apply(project, { type: "deleteGroup", groupId });
-  const index = new Map(project.words.map((w) => [w.id, w]));
-  const old = group.wordIds.map((id) => index.get(id)!);
+  const index = wordIndex(project.words);
+  const old = groupWords(project.words, group);
 
   if (tokens.length === old.length) {
     // Same word count: keep every timing and only fix the spelling. A corrected word is no longer "uncertain".
@@ -198,10 +202,7 @@ function editGroupText(project: Project, groupId: string, text: string): Project
     cursor += duration;
     return word;
   });
-  const oldIds = new Set(group.wordIds);
-  const firstOld = project.words.findIndex((w) => oldIds.has(w.id));
-  const words = project.words.filter((w) => !oldIds.has(w.id));
-  words.splice(firstOld, 0, ...fresh);
+  const words = [...project.words, ...fresh];
   const accentTexts = new Set(group.accentWordIds.map((id) => index.get(id)?.text));
   const accents = fresh.filter((w) => accentTexts.has(w.text)).map((w) => w.id);
   // Only re-pick when the block had an accent; a block without one (manual mode) stays without.
@@ -216,8 +217,8 @@ function editGroupText(project: Project, groupId: string, text: string): Project
 function splitGroup(project: Project, groupId: string, time: number): Project {
   const group = project.groups.find((g) => g.id === groupId);
   if (!group || group.wordIds.length < 2 || time <= group.start || time >= group.end) return project;
-  const index = new Map(project.words.map((w) => [w.id, w]));
-  const words = group.wordIds.map((id) => index.get(id)!);
+  const index = wordIndex(project.words);
+  const words = groupWords(project.words, group);
   // Words whose midpoint lies before the playhead go left; always leave at least one word on each side.
   const k = Math.min(Math.max(words.filter((w) => (w.start + w.end) / 2 < time).length, 1), words.length - 1);
   const boundary = time > words[k - 1]!.start && time < words[k]!.end ? time : words[k]!.start;
@@ -233,11 +234,17 @@ function splitGroup(project: Project, groupId: string, time: number): Project {
   ]);
 }
 
+/** Applies `command`; the result always satisfies the caption-data rules in `normalize`. Returns `project` itself when nothing changes. */
 export function apply(project: Project, command: Command): Project {
+  const next = applyCommand(project, command);
+  return next === project ? project : normalize(next);
+}
+
+function applyCommand(project: Project, command: Command): Project {
   switch (command.type) {
     case "transcribed": {
       const max = command.maxEnd ?? Infinity;
-      const groups = segmentWords(command.words, project.style).map((g) => (g.end > max ? { ...g, end: Math.max(max, g.start + MIN_DURATION) } : g));
+      const groups = segmentFresh(project, command.words, project.style).map((g) => (g.end > max ? { ...g, end: Math.max(max, g.start + MIN_DURATION) } : g));
       return { ...project, words: command.words, groups };
     }
     case "setStyle": {
@@ -258,7 +265,9 @@ export function apply(project: Project, command: Command): Project {
           const { override: _, ...rest } = g;
           return rest;
         }
-        return { ...g, override: { style: { ...g.override?.style, ...command.style } } };
+        const old = g.override?.style;
+        const font = old?.font || command.style.font ? { ...old?.font, ...command.style.font } : undefined;
+        return { ...g, override: { style: { ...old, ...command.style, ...(font && { font }) } } };
       });
     case "removeFillers":
       return removeFillers(project);

@@ -2,6 +2,7 @@ import { Merge, Pause, Play, Plus, Scissors, StepBack, StepForward, Trash, ZoomI
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { thumbnails, waveform } from "../media/strips";
 import type { Command } from "../project/commands";
+import { groupText } from "../project/model";
 import { findActiveIndex, showTime } from "../project/timing";
 import type { CaptionGroup, Project } from "../project/types";
 import { formatTime } from "./format";
@@ -38,10 +39,7 @@ export function Timeline({ file, project, duration, time, playing, onPlayPause, 
   const tick = TICK_STEPS.find((s) => s * pps >= 80) ?? 120;
   const activeGroup = project.groups[findActiveIndex(project.groups, time)];
   const selectedIndex = project.groups.findIndex((g) => g.id === selectedId);
-  const texts = useMemo(() => {
-    const index = new Map(project.words.map((w) => [w.id, w.text]));
-    return new Map(project.groups.map((g) => [g.id, g.wordIds.map((id) => index.get(id)).join(" ")]));
-  }, [project.words, project.groups]);
+  const texts = useMemo(() => new Map(project.groups.map((g) => [g.id, groupText(project.words, g)])), [project.words, project.groups]);
 
   useEffect(() => {
     let live = true;

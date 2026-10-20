@@ -17,7 +17,7 @@ export type CaptionGroup = {
   end: number;
   accentWordIds: string[];
   /** Per-block exceptions on top of the project style, e.g. a caption dragged elsewhere. */
-  override?: { style?: Partial<StylePreset> };
+  override?: { style?: StyleOverride };
 };
 
 export type AnimationId = "none" | "pop" | "word-by-word" | "word-pop" | "karaoke" | "bounce" | "slide-up";
@@ -48,8 +48,26 @@ export type StylePreset = {
   fadeOut: boolean;
 };
 
+/** Only the fields a block changes; `font` too, so a block that is just bigger still follows the project's font family. */
+export type StyleOverride = Partial<Omit<StylePreset, "font">> & { font?: Partial<StylePreset["font"]> };
+
 export type Project = {
   words: Word[];
   groups: CaptionGroup[];
   style: StylePreset;
+};
+
+/** What the Claude correction pass gets: ids and text only. Shared by client and server. */
+export type RefineInput = {
+  words: { id: string; text: string }[];
+  groups: { id: string; wordIds: string[] }[];
+  glossary: string[];
+};
+
+/** Validated, ID-based result. A merged word keeps the id of its first word. */
+export type Refinement = {
+  corrections: { wordId: string; text: string }[];
+  merges: { wordIds: string[]; text: string }[];
+  accents: { groupId: string; wordIds: string[] }[];
+  notes: string[];
 };

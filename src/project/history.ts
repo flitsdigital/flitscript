@@ -1,4 +1,5 @@
 import { apply, type Command } from "./commands";
+import { normalize } from "./model";
 import type { Project } from "./types";
 
 export type History = { past: Project[]; present: Project; future: Project[]; gesture: { key: string; at: number } | null };
@@ -13,7 +14,8 @@ export type HistoryAction =
 const LIMIT = 200;
 const GESTURE_GAP_MS = 1000;
 
-export const initHistory = (project: Project): History => ({ past: [], present: project, future: [], gesture: null });
+/** Loaded data is normalized too, so projects saved before a rule existed follow it from here on. */
+export const initHistory = (project: Project): History => ({ past: [], present: normalize(project), future: [], gesture: null });
 
 export function historyReducer(history: History, action: HistoryAction): History {
   switch (action.type) {

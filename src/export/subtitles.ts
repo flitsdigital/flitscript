@@ -1,3 +1,4 @@
+import { groupText } from "../project/model";
 import type { Project } from "../project/types";
 
 function stamp(seconds: number, separator: "," | "."): string {
@@ -10,8 +11,7 @@ function stamp(seconds: number, separator: "," | "."): string {
 }
 
 function cues(project: Project) {
-  const text = new Map(project.words.map((w) => [w.id, w.text]));
-  return project.groups.map((g) => ({ start: g.start, end: g.end, text: g.wordIds.map((id) => text.get(id)).join(" ") }));
+  return project.groups.map((g) => ({ start: g.start, end: g.end, text: groupText(project.words, g) }));
 }
 
 export function toSrt(project: Project): string {

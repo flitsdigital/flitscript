@@ -1,7 +1,7 @@
 import { Trash, Upload } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ANIMATIONS } from "../captions/animations";
-import { addCustomFont, ensureFont, nearestWeight, useFontFamilies } from "../captions/fonts";
+import { ensureFont, nearestWeight, useFontFamilies } from "../captions/fonts";
 import { PRESETS } from "../captions/presets";
 import type { AnimationId, StylePreset } from "../project/types";
 import { ColorPicker } from "./ColorPicker";
@@ -13,7 +13,8 @@ type Props = {
   customPresets: StylePreset[];
   onSavePreset: (name: string) => Promise<void>;
   onDeletePreset: (id: string) => Promise<void>;
-  onFontUploaded: (file: File, family: string) => void;
+  /** Registers and stores an uploaded font file; resolves to its family name, rejects for invalid files. */
+  onUploadFont: (file: File) => Promise<string>;
   onClearAccents: () => void;
 };
 
@@ -22,7 +23,7 @@ type Tab = "text" | "effect" | "animation";
 const WEIGHT_NAMES: Record<number, string> = { 400: "Regular", 500: "Medium", 600: "Semibold", 700: "Bold", 800: "Extrabold", 900: "Black" };
 
 
-export function StylePanel({ style, onStyle, customPresets, onSavePreset, onDeletePreset, onFontUploaded, onClearAccents }: Props) {
+export function StylePanel({ style, onStyle, customPresets, onSavePreset, onDeletePreset, onUploadFont, onClearAccents }: Props) {
   const families = useFontFamilies();
   const [tab, setTab] = useState<Tab>("text");
   const [fontError, setFontError] = useState<string | null>(null);
@@ -40,9 +41,8 @@ export function StylePanel({ style, onStyle, customPresets, onSavePreset, onDele
     if (!file) return;
     setFontError(null);
     try {
-      const family = await addCustomFont(file);
+      const family = await onUploadFont(file);
       set({ font: { ...style.font, family, weight: 400 } });
-      onFontUploaded(file, family);
     } catch {
       setFontError("Dit bestand is geen geldig lettertype (.ttf, .otf, .woff of .woff2).");
     }

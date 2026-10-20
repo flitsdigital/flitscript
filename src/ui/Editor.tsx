@@ -1,16 +1,18 @@
 import { ArrowLeft, Captions, Check, CloudOff, Download, Info, LoaderCircle, Palette, Redo2, Replace, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { addCustomFont, ensureFont } from "../captions/fonts";
-import { pickVideo, saveHandle } from "../media/file-handles";
-import { fingerprint } from "../media/fingerprint";
+import { usedFonts } from "../captions/style";
+import { pickVideo } from "../media/file-handles";
 import { stepFrameTime } from "../media/frame-timing";
-import { probe, ProbeError, type VideoMeta } from "../media/probe";
-import { newGroupId, type Command } from "../project/commands";
+import { ProbeError, type VideoMeta } from "../media/probe";
+import { createAutosave, type SaveState } from "../project/autosave";
+import { newGroupId, styleCommand, type Command, type StyleScope } from "../project/commands";
 import { historyReducer, initHistory } from "../project/history";
+import { linkSourceVideo, readSourceVideo } from "../project/source-video";
 import { deletePreset, downloadFont, listFonts, listPresets, saveGlossary, savePreset, updateProject, uploadFont } from "../project/store";
 import { findActiveIndex } from "../project/timing";
-import type { StylePreset } from "../project/types";
-import type { OverlayEditing, StyleScope } from "./CaptionOverlay";
+import type { Project, StylePreset } from "../project/types";
+import type { OverlayEditing } from "./CaptionOverlay";
 import { CaptionsPanel } from "./CaptionsPanel";
 import { EditorMenu, type MenuActions } from "./EditorMenu";
 import { ExportDialog } from "./ExportDialog";
@@ -23,7 +25,6 @@ import { Timeline } from "./Timeline";
 
 type Source = { file: File; meta: VideoMeta };
 type PanelId = "captions" | "style" | "source";
-type SaveState = "saved" | "saving" | "error";
 
 const SAVE_DELAY_MS = 800;
 
@@ -51,12 +52,14 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
   const project = history.present;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [customPresets, setCustomPresets] = useState<StylePreset[]>([]);
-  const [readyFont, setReadyFont] = useState<string | null>(null);
+  const [readyFonts, setReadyFonts] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [scope, setScope] = useState<StyleScope>("all");
   const [saveState, setSaveState] = useState<SaveState>("saved");
-  const savedRef = useRef(project);
+  const [autosave] = useState(() =>
+    createAutosave(async (data: Project) => void (await updateProject(projectId, { data })), opened.data, setSaveState, SAVE_DELAY_MS),
+  );
 
   const run = useCallback((command: Command, gesture?: string) => dispatch({ type: "do", command, gesture, at: performance.now() }), []);
   const setStyle = useCallback((style: StylePreset, gesture?: string) => run({ type: "setStyle", style }, gesture && `style:${gesture}`), [run]);
@@ -77,40 +80,25 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
     [source],
   );
 
-  // Captions only render once their font is loaded; layouts measured with a fallback font would stay cached.
-  const { family, weight } = project.style.font;
-  const fontKey = `${family}|${weight}`;
+  // Captions only render once all their fonts are loaded; layouts measured with a fallback font would stay cached.
+  const fonts = usedFonts(project);
+  const fontKey = fonts.map((f) => `${f.family}|${f.weight}`).join(",");
   useEffect(() => {
     let live = true;
-    ensureFont(family, weight).then(
-      () => live && setReadyFont(fontKey),
+    Promise.all(fonts.map((f) => ensureFont(f.family, f.weight))).then(
+      () => live && setReadyFonts(fontKey),
       (e) => live && setError(`Lettertype kon niet laden: ${String(e)}`),
     );
     return () => {
       live = false;
     };
-  }, [family, weight, fontKey]);
-  const renderable = readyFont === fontKey && project.groups.length ? project : null;
+    // fontKey describes `fonts` exactly; `fonts` itself is a new array every render.
+  }, [fontKey]);
+  const renderable = readyFonts === fontKey && project.groups.length ? project : null;
 
   // Autosave: every change lands in Supabase shortly after it stops.
-  const save = useCallback(async () => {
-    const current = project;
-    if (current === savedRef.current) return;
-    setSaveState("saving");
-    try {
-      await updateProject(projectId, { data: current });
-      savedRef.current = current;
-      setSaveState("saved");
-    } catch {
-      setSaveState("error");
-    }
-  }, [project, projectId]);
-  useEffect(() => {
-    if (project === savedRef.current) return;
-    setSaveState("saving");
-    const timer = setTimeout(() => void save(), SAVE_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [project, save]);
+  useEffect(() => autosave.change(project), [autosave, project]);
+  useEffect(() => autosave.dispose, [autosave]);
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => saveState !== "saved" && e.preventDefault();
     window.addEventListener("beforeunload", warn);
@@ -127,7 +115,7 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
   }, [clientId]);
 
   async function exit() {
-    await save();
+    await autosave.flush();
     onExit();
   }
 
@@ -137,16 +125,16 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
     setError(null);
     setNotice(null);
     try {
-      const meta = await probe(picked.file);
-      setSource({ file: picked.file, meta });
+      const video = await readSourceVideo(picked.file);
+      const { meta } = video;
+      setSource({ file: video.file, meta });
       setTime(0);
       // Captions, style and undo history stay; only the footage underneath changes.
       const lastEnd = Math.max(0, ...project.groups.map((g) => g.end));
       if (lastEnd > meta.duration + 0.05) {
         setNotice(`De nieuwe video is ${(lastEnd - meta.duration).toFixed(1)} s korter dan de captions; captions na ${meta.duration.toFixed(1)} s vallen buiten beeld.`);
       }
-      await updateProject(projectId, { fingerprint: await fingerprint(picked.file, meta.duration), video_meta: meta });
-      await saveHandle(projectId, picked.handle);
+      await linkSourceVideo(projectId, video, picked.handle);
     } catch (e) {
       setError(e instanceof ProbeError ? e.message : `Kon het bestand niet lezen: ${String(e)}`);
     }
@@ -197,10 +185,10 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
     onSelect: setSelectedId,
     scope,
     onScope: setScope,
-    onPatch: (groupId, patch, gesture) =>
-      scope === "group"
-        ? run({ type: "setGroupStyle", groupId, style: patch }, gesture && `group:${groupId}:${gesture}`)
-        : setStyle({ ...project.style, ...patch }, gesture),
+    onPatch: (groupId, patch, gesture) => {
+      const change = styleCommand(project, scope, groupId, patch, gesture);
+      run(change.command, change.gesture);
+    },
     onResetGroup: (groupId) => run({ type: "setGroupStyle", groupId, style: null }),
   };
 
@@ -268,7 +256,11 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
                   await deletePreset(id);
                   setCustomPresets((p) => p.filter((x) => x.id !== id));
                 }}
-                onFontUploaded={(file, fontFamily) => void uploadFont(clientId, fontFamily, file).catch((e) => setError(String(e)))}
+                onUploadFont={async (file) => {
+                  const fontFamily = await addCustomFont(file);
+                  void uploadFont(clientId, fontFamily, file).catch((e) => setError(String(e)));
+                  return fontFamily;
+                }}
                 onClearAccents={() => run({ type: "clearAccents" })}
               />
             </div>
@@ -284,7 +276,7 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
               </IconButton>
               <span className="truncate font-medium">{opened.name}</span>
               {opened.client && <span className="shrink-0 rounded-md bg-neutral-200/70 px-1.5 py-0.5 text-xs text-neutral-600">{opened.client.name}</span>}
-              <SaveIndicator state={saveState} onRetry={() => void save()} />
+              <SaveIndicator state={saveState} onRetry={() => void autosave.flush()} />
               <div className="ml-auto flex items-center gap-1">
                 <IconButton label="Ongedaan maken (⌘Z)" disabled={!history.past.length} onClick={() => dispatch({ type: "undo" })}>
                   <Undo2 size={16} />
@@ -301,8 +293,8 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
                 </Button>
               </div>
             </header>
-            {error && <p className="mx-4 rounded-lg bg-red-50 px-3 py-2 text-red-700">{error}</p>}
-            {notice && <p className="mx-4 rounded-lg bg-orange-50 px-3 py-2 text-orange-800">{notice}</p>}
+            {error && <p className="enter mx-4 rounded-lg bg-red-50 px-3 py-2 text-red-700">{error}</p>}
+            {notice && <p className="enter mx-4 rounded-lg bg-orange-50 px-3 py-2 text-orange-800">{notice}</p>}
             <EditorMenu actions={menu}>
               <div className="flex min-h-0 flex-1 flex-col">
                 {url && <Preview key={url} src={url} meta={source.meta} videoRef={videoRef} onTime={setTime} onPlaying={setPlaying} project={renderable} editing={editing} />}

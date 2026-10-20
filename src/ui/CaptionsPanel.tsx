@@ -1,11 +1,17 @@
 import { Captions, Eraser, LoaderCircle, Merge, Plus, RefreshCw, Search, Sparkles, Trash, X } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { findMatches, isFiller, type Command } from "../project/commands";
+import { groupWords } from "../project/model";
 import { findActiveIndex, showTime } from "../project/timing";
 import type { CaptionGroup, Project, Word } from "../project/types";
 import { transcribe } from "../transcription/transcribe";
 import { formatTime } from "./format";
 import { Button, fieldClass, IconButton } from "./kit";
+
+// A fresh transcript's rows rise in one after another; the delay stops growing after the first few, so the list never waits on it.
+const STAGGER_MS = 30;
+const STAGGER_ROWS = 10;
+const REVEAL_MS = STAGGER_ROWS * STAGGER_MS + 300;
 
 type Status = { kind: "idle" } | { kind: "busy"; label: string } | { kind: "error"; message: string };
 
@@ -27,14 +33,14 @@ type Props = {
 export function CaptionsPanel({ file, duration, onAddCaption, initialGlossary, onGlossary, project, run, time, selectedId, onSelect, onSeek }: Props) {
   const [glossary, setGlossary] = useState(initialGlossary.join(", "));
   const [status, setStatus] = useState<Status>({ kind: "idle" });
+  // Only right after transcribing: the panel stays mounted while hidden, so a plain entrance would replay on every tab switch.
+  const [revealing, setRevealing] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
-  const index = useMemo(() => new Map(project.words.map((w) => [w.id, w])), [project.words]);
   const activeId = project.groups[findActiveIndex(project.groups, time)]?.id;
   const busy = status.kind === "busy";
   const [search, setSearch] = useState<{ find: string; replace: string } | null>(null);
-  const captioned = useMemo(() => project.groups.flatMap((g) => g.wordIds.map((id) => index.get(id)!)), [project.groups, index]);
-  const matches = search ? findMatches(captioned, search.find).length : 0;
-  const fillers = captioned.filter((w) => isFiller(w.text));
+  const matches = search ? findMatches(project.words, search.find).length : 0;
+  const fillers = project.words.filter((w) => isFiller(w.text));
 
   useEffect(() => {
     if (activeId) listRef.current?.querySelector(`[data-group="${activeId}"]`)?.scrollIntoView({ block: "nearest" });
@@ -50,6 +56,8 @@ export function CaptionsPanel({ file, duration, onAddCaption, initialGlossary, o
       );
       run({ type: "transcribed", words, maxEnd: duration });
       setStatus({ kind: "idle" });
+      setRevealing(true);
+      setTimeout(() => setRevealing(false), REVEAL_MS);
     } catch (error) {
       setStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
     }
@@ -171,18 +179,19 @@ export function CaptionsPanel({ file, duration, onAddCaption, initialGlossary, o
       ) : (
         <div ref={listRef} className="flex-1 space-y-0.5 overflow-y-auto p-2">
           {project.groups.map((group, i) => (
-            <CaptionRow
-              key={group.id}
-              group={group}
-              index={index}
-              active={group.id === activeId}
-              selected={group.id === selectedId}
-              hasNext={i < project.groups.length - 1}
-              run={run}
-              onSelect={onSelect}
-              onSeek={onSeek}
-              query={search?.find ?? ""}
-            />
+            <div key={group.id} className={revealing ? "enter" : undefined} style={revealing ? { transitionDelay: `${Math.min(i, STAGGER_ROWS) * STAGGER_MS}ms` } : undefined}>
+              <CaptionRow
+                group={group}
+                words={project.words}
+                active={group.id === activeId}
+                selected={group.id === selectedId}
+                hasNext={i < project.groups.length - 1}
+                run={run}
+                onSelect={onSelect}
+                onSeek={onSeek}
+                query={search?.find ?? ""}
+              />
+            </div>
           ))}
           <Button variant="ghost" className="mt-1 w-full" icon={<Plus size={15} />} onClick={onAddCaption}>
             Caption toevoegen op afspeelpositie
@@ -197,7 +206,8 @@ export function CaptionsPanel({ file, duration, onAddCaption, initialGlossary, o
 
 type RowProps = {
   group: CaptionGroup;
-  index: Map<string, Word>;
+  /** All project words; the row picks its own. */
+  words: readonly Word[];
   active: boolean;
   selected: boolean;
   hasNext: boolean;
@@ -207,8 +217,8 @@ type RowProps = {
   query: string;
 };
 
-const CaptionRow = memo(function CaptionRow({ group, index, active, selected, hasNext, run, onSelect, onSeek, query }: RowProps) {
-  const words = group.wordIds.map((id) => index.get(id)!);
+const CaptionRow = memo(function CaptionRow({ group, words: all, active, selected, hasNext, run, onSelect, onSeek, query }: RowProps) {
+  const words = groupWords(all, group);
   const hits = new Set(findMatches(words, query).map((w) => w.id));
   const text = words.map((w) => w.text).join(" ");
   const uncertain = words.some((w) => w.confidence < 0.5);

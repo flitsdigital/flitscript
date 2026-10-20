@@ -35,10 +35,16 @@ export async function supportedCodecs(meta: VideoMeta, bitrate: number): Promise
   return { avc, hevc };
 }
 
-/** Runs the frame-exact export in a worker, streaming straight into `handle`. */
+/** Chrome-only `FileSystemHandle.remove()`; the save picker has already created the (empty) file. */
+const removeFile = (handle: FileSystemFileHandle) => (handle as FileSystemFileHandle & { remove?: () => Promise<void> }).remove?.().catch(() => {});
+
+/**
+ * Runs the frame-exact export in a worker, streaming straight into `handle`.
+ * `done` settles only once the outcome is final on disk: a complete file, or (canceled or failed) no file at all.
+ */
 export function startExport(request: Omit<ExportRequest, "type">, onProgress: (progress: number) => void) {
   const worker = new Worker(new URL("./export-worker.ts", import.meta.url), { type: "module" });
-  const done = new Promise<"done" | "canceled">((resolve, reject) => {
+  const finished = new Promise<"done" | "canceled">((resolve, reject) => {
     worker.onmessage = (event: MessageEvent<ExportMessage>) => {
       const message = event.data;
       if (message.type === "progress") return onProgress(message.progress);
@@ -52,6 +58,16 @@ export function startExport(request: Omit<ExportRequest, "type">, onProgress: (p
       reject(new Error(event.message || "De export-worker is gecrasht."));
     };
   });
+  const done = finished.then(
+    async (result) => {
+      if (result === "canceled") await removeFile(request.handle);
+      return result;
+    },
+    async (error: unknown) => {
+      await removeFile(request.handle);
+      throw error;
+    },
+  );
   worker.postMessage({ type: "start", ...request } satisfies ExportRequest);
   return { done, cancel: () => worker.postMessage({ type: "cancel" }) };
 }

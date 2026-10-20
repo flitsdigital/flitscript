@@ -1,20 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
-
-export type RefineInput = {
-  words: { id: string; text: string }[];
-  groups: { id: string; wordIds: string[] }[];
-  glossary: string[];
-};
-
-/** Validated, ID-based result. A merged word keeps the id of its first word. */
-export type Refinement = {
-  corrections: { wordId: string; text: string }[];
-  merges: { wordIds: string[]; text: string }[];
-  accents: { groupId: string; wordIds: string[] }[];
-  notes: string[];
-};
+import type { RefineInput, Refinement } from "../src/project/types";
 
 const outputSchema = z.object({
   corrections: z.array(z.object({ index: z.number().int(), text: z.string() })),

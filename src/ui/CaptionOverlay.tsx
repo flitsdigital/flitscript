@@ -1,11 +1,11 @@
 import { Minus, Plus, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { captionBoxAt, effectiveStyle, renderCaptions, type Rect } from "../captions/render";
-import type { Project, StylePreset } from "../project/types";
+import { captionBoxAt, renderCaptions, type Rect } from "../captions/render";
+import { effectiveStyle } from "../captions/style";
+import type { StyleScope } from "../project/commands";
+import type { Project, StyleOverride, StylePreset } from "../project/types";
 import { ColorPicker } from "./ColorPicker";
-
-export type StyleScope = "all" | "group";
 
 export type OverlayEditing = {
   selectedId: string | null;
@@ -13,7 +13,7 @@ export type OverlayEditing = {
   scope: StyleScope;
   onScope: (scope: StyleScope) => void;
   /** Applies a style change to all captions or to this block only, depending on `scope`. */
-  onPatch: (groupId: string, patch: Partial<StylePreset>, gesture?: string) => void;
+  onPatch: (groupId: string, patch: StyleOverride, gesture?: string) => void;
   onResetGroup: (groupId: string) => void;
 };
 
@@ -181,8 +181,9 @@ function CaptionToolbar({
   position: { left: number; top: number };
   above: boolean;
 }) {
-  const patch = (p: Partial<StylePreset>, gesture?: string) => editing.onPatch(groupId, p, gesture);
-  const size = (delta: number) => patch({ font: { ...style.font, size: Math.min(0.12, Math.max(0.015, +(style.font.size + delta).toFixed(4))) } }, "size");
+  const patch = (p: StyleOverride, gesture?: string) => editing.onPatch(groupId, p, gesture);
+  // Only the size: a block that is just bigger keeps following the project's font family.
+  const size = (delta: number) => patch({ font: { size: Math.min(0.12, Math.max(0.015, +(style.font.size + delta).toFixed(4))) } }, "size");
   return (
     <div
       onPointerDown={(e) => e.stopPropagation()}

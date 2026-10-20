@@ -215,6 +215,6 @@ describe("setGroupTiming moves the words along", () => {
     expect(words.at(-1)!.end).toBeLessThanOrEqual(p.groups[0]!.end);
     for (let i = 1; i < words.length; i++) expect(words[i]!.start).toBeGreaterThanOrEqual(words[i - 1]!.end - 1e-9);
     // Words of other blocks stay put.
-    expect(p.words.find((w) => w.id === "w0")).toEqual(project.words[0]);
+    expect(p.words.find((w) => w.id === "w6")).toEqual(project.words[6]);
   });
 });

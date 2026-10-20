@@ -196,3 +196,19 @@ Eerder veranderde het slepen van een blokrand alleen de bloktijd; de woorden hie
 
 ## 2026-10-20 — Captiontekst past live aan
 Elke toetsaanslag in het tekstveld gaat direct als `editGroupText` door, met gesture-key `text:<blok>`: een reeks typen is één undo-stap. Zolang het veld focus heeft houdt het een eigen waarde, zodat hergroeperen van woorden of spaties de cursor niet verspringt. Een tussentijds leeg veld (alles selecteren, dan typen) wordt overgeslagen; een leeg veld bij verlaten verwijdert het blok, zoals voorheen.
+
+## 2026-10-20 — Architectuuropschoning
+- **Regels van de captiondata op één plek** (`project/model.ts` `normalize`). Elk command en elk geladen project gaat erdoorheen:
+  - elk blok heeft minstens één woord;
+  - een woord hoort bij hooguit één blok;
+  - accenten zijn woorden van het eigen blok;
+  - blokken overlappen niet;
+  - `words` bevat alleen woorden die in een blok staan, gesorteerd op tijd.
+
+  Woorden van een verwijderd blok verdwijnen dus mee. Een property-test (`model.test.ts`) voert willekeurige reeksen commands uit en controleert na elke stap de regels.
+- **Blokken krijgen bij opnieuw indelen of transcriberen altijd nieuwe ids.** Een selectie kan dus niet meer ongemerkt naar een ander blok springen. Eigen stijl per blok blijft bij opnieuw indelen behouden.
+- **Stijl per blok slaat alleen de gewijzigde velden op, ook binnen `font`.** Een blok dat alleen groter is, volgt dus het lettertype van het project. Preview en export laden alle fonts die in gebruik zijn (`usedFonts`), ook die van uitzonderingen per blok.
+- **Een video koppelen aan een project** (nieuw, heropenen, vervangen) loopt via `project/source-video.ts`.
+- **Autosave** staat los van React (`project/autosave.ts`). Opslagen gebeuren één voor één en op volgorde.
+- **Export:** `startExport` is eigenaar van het doelbestand. Na annuleren, een fout of een crash bestaat er óf een compleet bestand óf niets, ook als een font niet laadt.
+- **Draadformaten** (`RefineInput`, `Refinement`) staan in `project/types.ts`. De server importeert ze van de client, nooit andersom. De refine-keten blijft staan voor later (Claude staat nog uit).
