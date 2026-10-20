@@ -23,6 +23,10 @@ describe("subtitles", () => {
     );
   });
 
+  it("shifts cues onto an exported video that starts at the source's start time", () => {
+    expect(toSrt(project, 0.5).split("\n")[1]).toBe("00:00:00,000 --> 00:00:00,750");
+  });
+
   it("writes WebVTT with a header and dot milliseconds", () => {
     expect(toVtt(project)).toBe("WEBVTT\n\n00:00:00.500 --> 00:00:01.250\nDit is\n\n01:01:01.200 --> 01:01:02.000\nAdBlue.\n");
   });

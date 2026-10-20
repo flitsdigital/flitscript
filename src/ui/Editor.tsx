@@ -1,6 +1,6 @@
 import { ArrowLeft, Captions, Check, CloudOff, Download, Info, LoaderCircle, Palette, Redo2, Replace, Undo2 } from "lucide-react";
-import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
-import { addCustomFont, ensureFont } from "../captions/fonts";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import { addCustomFont, ensureFont, useFontFamilies } from "../captions/fonts";
 import { usedFonts } from "../captions/style";
 import { pickVideo } from "../media/file-handles";
 import { stepFrameTime } from "../media/frame-timing";
@@ -28,9 +28,9 @@ type PanelId = "captions" | "style" | "source";
 
 const SAVE_DELAY_MS = 800;
 
+// Every input counts: arrows and Backspace on a focused slider must move the slider, not the video or the selection.
 const isTyping = (target: EventTarget | null) =>
-  target instanceof HTMLElement &&
-  (target.isContentEditable || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || (target instanceof HTMLInputElement && target.type === "text"));
+  target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
 export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () => void }) {
   const projectId = opened.id;
@@ -44,6 +44,7 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
     return () => URL.revokeObjectURL(next);
   }, [source.file]);
   const [error, setError] = useState<string | null>(null);
+  const [fontError, setFontError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -81,19 +82,25 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
   );
 
   // Captions only render once all their fonts are loaded; layouts measured with a fallback font would stay cached.
-  const fonts = usedFonts(project);
+  // `families` changes when the client's uploaded fonts arrive, so a project using one retries after the download.
+  const families = useFontFamilies();
+  const fonts = useMemo(() => usedFonts(project), [project]);
   const fontKey = fonts.map((f) => `${f.family}|${f.weight}`).join(",");
   useEffect(() => {
     let live = true;
     Promise.all(fonts.map((f) => ensureFont(f.family, f.weight))).then(
-      () => live && setReadyFonts(fontKey),
-      (e) => live && setError(`Lettertype kon niet laden: ${String(e)}`),
+      () => {
+        if (!live) return;
+        setReadyFonts(fontKey);
+        setFontError(null);
+      },
+      (e) => live && setFontError(`Lettertype kon niet laden: ${String(e)}`),
     );
     return () => {
       live = false;
     };
     // fontKey describes `fonts` exactly; `fonts` itself is a new array every render.
-  }, [fontKey]);
+  }, [fontKey, families]);
   const renderable = readyFonts === fontKey && project.groups.length ? project : null;
 
   // Autosave: every change lands in Supabase shortly after it stops.
@@ -108,16 +115,20 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
   // The client's own presets and fonts.
   useEffect(() => {
     listPresets(clientId).then(setCustomPresets, (e) => setError(String(e)));
-    listFonts(clientId).then(
-      (fonts) => Promise.all(fonts.map(async (f) => addCustomFont(await downloadFont(f)))),
-      (e) => setError(String(e)),
-    );
+    listFonts(clientId)
+      .then((fonts) => Promise.all(fonts.map(async (f) => addCustomFont(await downloadFont(f)))))
+      .catch((e) => setError(`Lettertypes van de klant konden niet laden: ${String(e)}`));
   }, [clientId]);
 
+  // Stays in the editor when the last changes couldn't be saved; the save indicator offers a retry.
   async function exit() {
-    await autosave.flush();
-    onExit();
+    if (await autosave.flush()) onExit();
   }
+
+  // A deleted block's id can come back on a new block (ids are "highest + 1"), so drop a selection that points nowhere.
+  useEffect(() => {
+    if (selectedId && !project.groups.some((g) => g.id === selectedId)) setSelectedId(null);
+  }, [project.groups, selectedId]);
 
   async function replaceVideo() {
     const picked = await pickVideo();
@@ -129,6 +140,7 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
       const { meta } = video;
       setSource({ file: video.file, meta });
       setTime(0);
+      setPlaying(false); // the old <video> unmounts without firing "pause"
       // Captions, style and undo history stay; only the footage underneath changes.
       const lastEnd = Math.max(0, ...project.groups.map((g) => g.end));
       if (lastEnd > meta.duration + 0.05) {
@@ -142,7 +154,8 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (isTyping(event.target)) return;
+      // Edits behind the export dialog would change what's on screen, and emptying the project closes (and cancels) it.
+      if (exporting || isTyping(event.target)) return;
       const mod = event.metaKey || event.ctrlKey;
       if (mod && event.code === "KeyE") {
         event.preventDefault();
@@ -172,7 +185,7 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [project.groups, run, playPause, step, selectedId, renderable]);
+  }, [project.groups, run, playPause, step, selectedId, renderable, exporting]);
 
   const addCaption = () => {
     const id = newGroupId(project);
@@ -180,6 +193,28 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
     setSelectedId(id);
     setPanel("captions");
   };
+  const savePresetAs = useCallback(
+    async (name: string) => {
+      const saved = await savePreset(clientId, { ...project.style, name });
+      setCustomPresets((p) => [...p, saved]);
+      setStyle(saved);
+    },
+    [clientId, project.style, setStyle],
+  );
+  const removePreset = useCallback(async (id: string) => {
+    await deletePreset(id);
+    setCustomPresets((p) => p.filter((x) => x.id !== id));
+  }, []);
+  const uploadClientFont = useCallback(
+    async (file: File) => {
+      const fontFamily = await addCustomFont(file);
+      void uploadFont(clientId, fontFamily, file).catch((e) => setError(String(e)));
+      return fontFamily;
+    },
+    [clientId],
+  );
+  const clearAccents = useCallback(() => run({ type: "clearAccents" }), [run]);
+
   const editing: OverlayEditing = {
     selectedId,
     onSelect: setSelectedId,
@@ -247,21 +282,10 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
                 style={project.style}
                 onStyle={setStyle}
                 customPresets={customPresets}
-                onSavePreset={async (name) => {
-                  const saved = await savePreset(clientId, { ...project.style, name });
-                  setCustomPresets((p) => [...p, saved]);
-                  setStyle(saved);
-                }}
-                onDeletePreset={async (id) => {
-                  await deletePreset(id);
-                  setCustomPresets((p) => p.filter((x) => x.id !== id));
-                }}
-                onUploadFont={async (file) => {
-                  const fontFamily = await addCustomFont(file);
-                  void uploadFont(clientId, fontFamily, file).catch((e) => setError(String(e)));
-                  return fontFamily;
-                }}
-                onClearAccents={() => run({ type: "clearAccents" })}
+                onSavePreset={savePresetAs}
+                onDeletePreset={removePreset}
+                onUploadFont={uploadClientFont}
+                onClearAccents={clearAccents}
               />
             </div>
             <div className={panel === "source" ? "h-full" : "hidden"}>
@@ -293,7 +317,7 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
                 </Button>
               </div>
             </header>
-            {error && <p className="enter mx-4 rounded-lg bg-red-50 px-3 py-2 text-red-700">{error}</p>}
+            {(error ?? fontError) && <p className="enter mx-4 rounded-lg bg-red-50 px-3 py-2 text-red-700">{error ?? fontError}</p>}
             {notice && <p className="enter mx-4 rounded-lg bg-orange-50 px-3 py-2 text-orange-800">{notice}</p>}
             <EditorMenu actions={menu}>
               <div className="flex min-h-0 flex-1 flex-col">
@@ -305,26 +329,29 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
 
         <EditorMenu actions={menu}>
           <div>
-            <Timeline
-              key={url ?? ""}
-              file={source.file}
-              project={project}
-              duration={source.meta.duration}
-              time={time}
-              playing={playing}
-              onPlayPause={playPause}
-              onStep={step}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              onSeek={seek}
-              run={run}
-              onAddCaption={addCaption}
-            />
+            {/* Only with a url: a first mount without it would decode thumbnails and waveform once more for nothing. */}
+            {url && (
+              <Timeline
+                key={url}
+                file={source.file}
+                project={project}
+                duration={source.meta.duration}
+                time={time}
+                playing={playing}
+                onPlayPause={playPause}
+                onStep={step}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+                onSeek={seek}
+                run={run}
+                onAddCaption={addCaption}
+              />
+            )}
           </div>
         </EditorMenu>
       </div>
 
-      {exporting && renderable && <ExportDialog file={source.file} meta={source.meta} project={renderable} onClose={() => setExporting(false)} />}
+      {exporting && renderable && <ExportDialog projectId={projectId} file={source.file} meta={source.meta} project={renderable} onClose={() => setExporting(false)} />}
     </div>
   );
 }

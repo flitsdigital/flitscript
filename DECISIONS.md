@@ -206,9 +206,22 @@ Elke toetsaanslag in het tekstveld gaat direct als `editGroupText` door, met ges
   - `words` bevat alleen woorden die in een blok staan, gesorteerd op tijd.
 
   Woorden van een verwijderd blok verdwijnen dus mee. Een property-test (`model.test.ts`) voert willekeurige reeksen commands uit en controleert na elke stap de regels.
-- **Blokken krijgen bij opnieuw indelen of transcriberen altijd nieuwe ids.** Een selectie kan dus niet meer ongemerkt naar een ander blok springen. Eigen stijl per blok blijft bij opnieuw indelen behouden.
+- **Blokken krijgen bij opnieuw indelen of transcriberen ids die op dat moment niet in gebruik zijn.** Ids zijn "hoogste + 1", dus het id van een verwijderd blok kan terugkomen. Daarom wist de editor een selectie zodra die naar een blok wijst dat niet meer bestaat. Eigen stijl per blok blijft bij opnieuw indelen behouden.
 - **Stijl per blok slaat alleen de gewijzigde velden op, ook binnen `font`.** Een blok dat alleen groter is, volgt dus het lettertype van het project. Preview en export laden alle fonts die in gebruik zijn (`usedFonts`), ook die van uitzonderingen per blok.
 - **Een video koppelen aan een project** (nieuw, heropenen, vervangen) loopt via `project/source-video.ts`.
 - **Autosave** staat los van React (`project/autosave.ts`). Opslagen gebeuren één voor één en op volgorde.
 - **Export:** `startExport` is eigenaar van het doelbestand. Na annuleren, een fout of een crash bestaat er óf een compleet bestand óf niets, ook als een font niet laadt.
 - **Draadformaten** (`RefineInput`, `Refinement`) staan in `project/types.ts`. De server importeert ze van de client, nooit andersom. De refine-keten blijft staan voor later (Claude staat nog uit).
+
+## 2026-10-20 — Fixes na de codereview
+- Terug naar projecten gaat alleen als de laatste wijzigingen echt zijn opgeslagen; anders blijf je in de editor met de opslagfout in beeld.
+- Een project met een eigen font van de klant laadt opnieuw zodra de fonts van de klant binnen zijn. Eerder bleven de captions weg tot je de stijl aanpaste.
+- Exporteren naar het bronbestand wordt geweigerd. Zonder bewaarde handle (een gesleept bestand) geldt dezelfde bestandsnaam als bron.
+- De export rekent vanaf `VideoMeta.startTime`, de eerste tijdstempel van het primaire video- en audiospoor, net als de Conversion. Ook de `.srt`/`.vtt` bij de export schuiven daarnaar.
+- Exportafmetingen worden even gemaakt, want 4:2:0-encoders weigeren oneven formaten.
+- Sneltoetsen staan uit terwijl het exportvenster open is en wanneer een invoerveld focus heeft, ook een schuifregelaar.
+- Transcriptie gebruikt 16 kbps Opus en weigert video's langer dan 30 minuten vóór het uitpakken. De serverlimiet van 4 MB blijft.
+- "mm" telt niet meer als opvulwoord, want het is ook een maateenheid.
+- Een los woord van één letter gaat na een zinseinde of een pauze naar het vorige blok, niet naar de volgende zin.
+- Foutmeldingen van de spraakdienst gaan alleen naar de serverlog.
+- De refine-keten (Claude) blijft staan, zoals eerder besloten.

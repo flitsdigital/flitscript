@@ -57,3 +57,26 @@ describe("autosave", () => {
     expect(states.at(-1)).toBe("saved");
   });
 });
+
+describe("autosave flush result", () => {
+  it("is false when the save fails, so leaving the editor can be stopped", async () => {
+    const persist = vi.fn(async (_: string) => {}).mockRejectedValueOnce(new Error("offline"));
+    const { autosave } = setup(persist);
+    autosave.change("b");
+    expect(await autosave.flush()).toBe(false);
+    expect(await autosave.flush()).toBe(true);
+  });
+
+  it("clears a stale error once the stored value is current again", async () => {
+    let fail = () => {};
+    const persist = vi.fn((_: string) => new Promise<void>((_, reject) => (fail = () => reject(new Error("offline")))));
+    const { autosave, states } = setup(persist);
+    autosave.change("b");
+    void autosave.flush();
+    await vi.advanceTimersByTimeAsync(0);
+    autosave.change("a"); // undo while "b" is being written
+    fail();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(states.at(-1)).toBe("saved");
+  });
+});

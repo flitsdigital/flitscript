@@ -45,6 +45,13 @@ describe("segmentWords", () => {
     expect(texts(tail, segmentWords(tail, limits))).toEqual(["ik zie het. U"]);
   });
 
+  it("keeps a one-letter word with its own sentence instead of pulling it over a pause", () => {
+    const words = makeWords("Dat zeg ik u. Volgende vraag", { 4: 3 });
+    const groups = segmentWords(words, limits);
+    expect(texts(words, groups)).toEqual(["Dat zeg ik u.", "Volgende vraag"]);
+    expect(groups[1]!.start).toBe(words[4]!.start);
+  });
+
   it("is deterministic and keeps groups contiguous and non-overlapping", () => {
     const words = makeWords("Zonder deze vloeistof kan een moderne vrachtauto niet meer rijden.");
     const a = segmentWords(words, limits);

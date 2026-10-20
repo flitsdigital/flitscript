@@ -2,7 +2,7 @@ import { requireTeamMember } from "../server/auth";
 import { elevenLabsProvider } from "../server/elevenlabs";
 import { sanitizeKeyterms } from "../server/transcription";
 
-// Vercel caps request bodies at 4.5 MB; Opus at 32 kbps fits ~15 minutes in this.
+// Vercel caps request bodies at 4.5 MB; the client's 16 kbps Opus fits ~30 minutes in this.
 const MAX_AUDIO_BYTES = 4 * 1024 * 1024;
 
 export async function POST(request: Request): Promise<Response> {
@@ -28,8 +28,8 @@ export async function POST(request: Request): Promise<Response> {
     const words = await elevenLabsProvider.transcribe(audio, { language: "nl", keyterms });
     return Response.json({ words });
   } catch (error) {
+    // Details (provider status and body) stay in the server log; the browser gets a plain message.
     console.error("transcribe failed", error);
-    const message = error instanceof Error ? error.message : String(error);
-    return Response.json({ error: `Transcriptie mislukt: ${message}` }, { status: 502 });
+    return Response.json({ error: "Transcriptie mislukt bij de spraakdienst. Probeer het opnieuw." }, { status: 502 });
   }
 }

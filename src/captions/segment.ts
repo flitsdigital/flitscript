@@ -65,10 +65,14 @@ export function segmentWords(words: readonly Word[], limits: Limits): CaptionGro
   if (current.length) chunks.push(current);
 
   // A lone one-letter word reads as a glitch; fold it into a neighbour even if that exceeds the limits by one word.
+  // Into the next block only when it leads into it: after a clause end or a pause it belongs to what came before.
   for (let i = 0; i < chunks.length; i++) {
     if (chunks.length > 1 && isOrphan(chunks[i]!)) {
-      if (i + 1 < chunks.length) chunks[i + 1]!.unshift(...chunks[i]!);
-      else chunks[i - 1]!.push(...chunks[i]!);
+      const word = chunks[i]![0]!;
+      const next = chunks[i + 1];
+      const backward = !next || (i > 0 && (ENDS_CLAUSE.test(word.text) || next[0]!.start - word.end > PAUSE));
+      if (backward) chunks[i - 1]!.push(word);
+      else next.unshift(word);
       chunks.splice(i, 1);
       i--;
     }

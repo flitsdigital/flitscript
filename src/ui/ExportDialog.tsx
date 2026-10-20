@@ -2,14 +2,15 @@ import { Check, Download, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { fontSource } from "../captions/fonts";
 import { usedFonts } from "../captions/style";
-import { containerFor, startExport, supportedCodecs, type VideoCodecChoice } from "../export/export";
+import { containerFor, outputSize, startExport, supportedCodecs, type FontSource, type VideoCodecChoice } from "../export/export";
 import { toSrt, toVtt } from "../export/subtitles";
+import { loadHandle } from "../media/file-handles";
 import type { VideoMeta } from "../media/probe";
 import type { Project } from "../project/types";
 import { formatBitrate, formatBytes } from "./format";
 import { Button, fieldClass, IconButton } from "./kit";
 
-type Props = { file: File; meta: VideoMeta; project: Project; onClose: () => void };
+type Props = { projectId: string; file: File; meta: VideoMeta; project: Project; onClose: () => void };
 
 type State =
   | { kind: "idle" }
@@ -32,7 +33,7 @@ function formatEta(seconds: number): string {
   return seconds >= 60 ? `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s` : `${Math.max(1, Math.round(seconds))}s`;
 }
 
-export function ExportDialog({ file, meta, project, onClose }: Props) {
+export function ExportDialog({ projectId, file, meta, project, onClose }: Props) {
   const [codec, setCodec] = useState<VideoCodecChoice>("avc");
   const [factor, setFactor] = useState(1);
   const [support, setSupport] = useState<Record<VideoCodecChoice, boolean> | null>(null);
@@ -68,6 +69,13 @@ export function ExportDialog({ file, meta, project, onClose }: Props) {
 
   async function exportVideo() {
     const extension = `.${container}`;
+    // Before the picker: once it returns, the target file exists, and a failure here would leave it empty.
+    let fonts: FontSource[];
+    try {
+      fonts = usedFonts(project).map((f) => fontSource(f.family, f.weight));
+    } catch (error) {
+      return setState({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
     let handle: FileSystemFileHandle;
     try {
       handle = await window.showSaveFilePicker({
@@ -77,18 +85,24 @@ export function ExportDialog({ file, meta, project, onClose }: Props) {
     } catch {
       return; // picker dismissed
     }
+    // Writing into the source would replace it on success and delete it on cancel. Without a stored handle
+    // (a dropped file), the same name is the best check available.
+    const source = await loadHandle(projectId).catch(() => undefined);
+    if (source ? await handle.isSameEntry(source) : handle.name === file.name) {
+      return setState({ kind: "error", message: "Dat is de bronvideo zelf. Kies een andere naam, anders gaat het origineel verloren." });
+    }
     const startedAt = performance.now();
     const job = startExport(
       {
         file,
         handle,
         project,
-        fonts: usedFonts(project).map((f) => fontSource(f.family, f.weight)),
-        width: meta.width,
-        height: meta.height,
+        fonts,
+        ...outputSize(meta),
         codec,
         bitrate,
         fps: meta.timing.averageFps,
+        startTime: meta.startTime,
         container,
       },
       (progress) => setState((s) => (s.kind === "running" ? { ...s, progress } : s)),
@@ -191,10 +205,10 @@ export function ExportDialog({ file, meta, project, onClose }: Props) {
 
         <footer className="flex items-center gap-2 border-t border-neutral-100 bg-neutral-50 px-5 py-3">
           <span className="text-neutral-500">Ondertitels:</span>
-          <Button variant="ghost" onClick={() => download(`${baseName}.srt`, toSrt(project))}>
+          <Button variant="ghost" onClick={() => download(`${baseName}.srt`, toSrt(project, meta.startTime))}>
             .srt
           </Button>
-          <Button variant="ghost" onClick={() => download(`${baseName}.vtt`, toVtt(project))}>
+          <Button variant="ghost" onClick={() => download(`${baseName}.vtt`, toVtt(project, meta.startTime))}>
             .vtt
           </Button>
           <div className="ml-auto">

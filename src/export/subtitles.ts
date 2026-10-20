@@ -10,16 +10,17 @@ function stamp(seconds: number, separator: "," | "."): string {
   return `${pad(h)}:${pad(m)}:${pad(s)}${separator}${pad(ms % 1000, 3)}`;
 }
 
-function cues(project: Project) {
-  return project.groups.map((g) => ({ start: g.start, end: g.end, text: groupText(project.words, g) }));
+/** `startTime` shifts cues onto the exported video, which starts at 0 where the source started at `startTime`. */
+function cues(project: Project, startTime: number) {
+  return project.groups.map((g) => ({ start: g.start - startTime, end: g.end - startTime, text: groupText(project.words, g) }));
 }
 
-export function toSrt(project: Project): string {
-  return cues(project)
+export function toSrt(project: Project, startTime = 0): string {
+  return cues(project, startTime)
     .map((c, i) => `${i + 1}\n${stamp(c.start, ",")} --> ${stamp(c.end, ",")}\n${c.text}\n`)
     .join("\n");
 }
 
-export function toVtt(project: Project): string {
-  return `WEBVTT\n\n${cues(project).map((c) => `${stamp(c.start, ".")} --> ${stamp(c.end, ".")}\n${c.text}\n`).join("\n")}`;
+export function toVtt(project: Project, startTime = 0): string {
+  return `WEBVTT\n\n${cues(project, startTime).map((c) => `${stamp(c.start, ".")} --> ${stamp(c.end, ".")}\n${c.text}\n`).join("\n")}`;
 }

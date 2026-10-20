@@ -1,6 +1,6 @@
 import type { Session } from "@supabase/supabase-js";
 import { Film, LoaderCircle, LogOut, Plus, Trash, Upload } from "lucide-react";
-import { useEffect, useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import { PRESETS } from "../captions/presets";
 import { supabase } from "../lib/supabase";
 import { fileFromHandle, forgetHandle, loadHandle, pickVideo } from "../media/file-handles";
@@ -49,7 +49,11 @@ export function Home({ session, onOpen }: { session: Session; onOpen: (project: 
     }
   }, [clientId]);
 
+  // One action at a time: a second drop or click while a video is being analysed would start a second project.
+  const running = useRef(false);
   async function guard(label: string, fn: () => Promise<void>) {
+    if (running.current) return;
+    running.current = true;
     setBusy(label);
     setError(null);
     try {
@@ -57,6 +61,7 @@ export function Home({ session, onOpen }: { session: Session; onOpen: (project: 
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      running.current = false;
       setBusy(null);
     }
   }
@@ -123,7 +128,8 @@ export function Home({ session, onOpen }: { session: Session; onOpen: (project: 
     if (file) void startNew(file, handle?.kind === "file" ? handle : null);
   }
 
-  const visible = projects?.filter((p) => !clientId || p.client_id === clientId) ?? [];
+  // `client`, not `clientId`: a remembered client that was deleted meanwhile falls back to showing all projects.
+  const visible = projects?.filter((p) => !client || p.client_id === client.id) ?? [];
   const clientName = (id: string | null) => clients.find((c) => c.id === id)?.name ?? "Geen klant";
 
   return (
@@ -133,7 +139,7 @@ export function Home({ session, onOpen }: { session: Session; onOpen: (project: 
         e.preventDefault();
         setDragging(true);
       }}
-      onDragLeave={(e) => e.currentTarget === e.target && setDragging(false)}
+      onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setDragging(false)}
       onDrop={(e) => void onDrop(e)}
     >
       <header className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-200 bg-white px-6">
@@ -239,7 +245,7 @@ export function Home({ session, onOpen }: { session: Session; onOpen: (project: 
                       </span>
                     </span>
                   </button>
-                  <IconButton label="Project verwijderen" className="opacity-0 group-hover:opacity-100" onClick={() => remove(p)}>
+                  <IconButton label="Project verwijderen" className="opacity-0 group-hover:opacity-100" disabled={!!busy} onClick={() => remove(p)}>
                     <Trash size={15} />
                   </IconButton>
                 </li>

@@ -12,12 +12,8 @@ export async function thumbnails(file: File, duration: number, count: number, he
     const urls: string[] = [];
     for await (const frame of sink.canvasesAtTimestamps(times)) {
       if (!frame) continue;
-      const canvas = frame.canvas as HTMLCanvasElement | OffscreenCanvas;
-      urls.push(
-        "toDataURL" in canvas
-          ? canvas.toDataURL("image/jpeg", 0.7)
-          : URL.createObjectURL(await canvas.convertToBlob({ type: "image/jpeg", quality: 0.7 })),
-      );
+      // On the main thread CanvasSink always hands out an HTMLCanvasElement.
+      urls.push((frame.canvas as HTMLCanvasElement).toDataURL("image/jpeg", 0.7));
     }
     return urls;
   } finally {

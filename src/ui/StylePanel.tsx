@@ -1,5 +1,5 @@
 import { Trash, Upload } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { ANIMATIONS } from "../captions/animations";
 import { ensureFont, nearestWeight, useFontFamilies } from "../captions/fonts";
 import { PRESETS } from "../captions/presets";
@@ -23,7 +23,8 @@ type Tab = "text" | "effect" | "animation";
 const WEIGHT_NAMES: Record<number, string> = { 400: "Regular", 500: "Medium", 600: "Semibold", 700: "Bold", 800: "Extrabold", 900: "Black" };
 
 
-export function StylePanel({ style, onStyle, customPresets, onSavePreset, onDeletePreset, onUploadFont, onClearAccents }: Props) {
+// Memo: the editor re-renders every video frame, and this panel only depends on the style.
+export const StylePanel = memo(function StylePanel({ style, onStyle, customPresets, onSavePreset, onDeletePreset, onUploadFont, onClearAccents }: Props) {
   const families = useFontFamilies();
   const [tab, setTab] = useState<Tab>("text");
   const [fontError, setFontError] = useState<string | null>(null);
@@ -260,7 +261,7 @@ export function StylePanel({ style, onStyle, customPresets, onSavePreset, onDele
       </div>
     </div>
   );
-}
+});
 
 function PresetTile({ preset, active, onClick }: { preset: StylePreset; active: boolean; onClick: () => void }) {
   const text = (t: string) => (preset.uppercase ? t.toLocaleUpperCase("nl") : t);

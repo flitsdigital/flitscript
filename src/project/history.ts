@@ -8,8 +8,7 @@ export type HistoryAction =
   /** `gesture` merges a burst of changes (a slider or edge drag) into one undo step while they arrive < 1 s apart. */
   | { type: "do"; command: Command; gesture?: string; at?: number }
   | { type: "undo" }
-  | { type: "redo" }
-  | { type: "reset"; project: Project };
+  | { type: "redo" };
 
 const LIMIT = 200;
 const GESTURE_GAP_MS = 1000;
@@ -42,7 +41,5 @@ export function historyReducer(history: History, action: HistoryAction): History
       if (!next) return history;
       return { past: [...history.past, history.present], present: next, future: rest, gesture: null };
     }
-    case "reset":
-      return initHistory(action.project);
   }
 }

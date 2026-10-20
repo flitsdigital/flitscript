@@ -17,6 +17,8 @@ export type ExportRequest = {
   bitrate: number;
   /** Average source frame rate, for bitrate compensation. */
   fps: number;
+  /** Source time that becomes 0 in the output (`VideoMeta.startTime`); captions live on the source timeline. */
+  startTime: number;
   container: "mp4" | "mov";
 };
 
@@ -29,8 +31,11 @@ export type ExportMessage =
 /** MP4 for normal phone audio (AAC); MOV when the source carries PCM, so the audio can be copied untouched. */
 export const containerFor = (meta: VideoMeta): "mp4" | "mov" => (meta.audio?.codec.startsWith("pcm") ? "mov" : "mp4");
 
+/** Encoders need even dimensions for 4:2:0 video; an odd screen recording gets one extra pixel row or column. */
+export const outputSize = (meta: VideoMeta) => ({ width: meta.width + (meta.width % 2), height: meta.height + (meta.height % 2) });
+
 export async function supportedCodecs(meta: VideoMeta, bitrate: number): Promise<Record<VideoCodecChoice, boolean>> {
-  const check = (codec: VideoCodecChoice) => canEncodeVideo(codec, { width: meta.width, height: meta.height, bitrate: Math.round(bitrate) });
+  const check = (codec: VideoCodecChoice) => canEncodeVideo(codec, { ...outputSize(meta), bitrate: Math.round(bitrate) });
   const [avc, hevc] = await Promise.all([check("avc"), check("hevc")]);
   return { avc, hevc };
 }

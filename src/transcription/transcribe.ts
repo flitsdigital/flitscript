@@ -4,8 +4,11 @@ import type { Word } from "../project/types";
 
 export type TranscribeProgress = { stage: "audio"; progress: number } | { stage: "transcribe" };
 
+// /api/transcribe takes at most 4 MB; 16 kbps Opus is ~2 KB/s, so 30 minutes stays under it with room for container overhead.
+const MAX_SECONDS = 30 * 60;
+
 /**
- * Pulls the primary audio track out as mono 16 kHz Opus (~240 KB per minute).
+ * Pulls the primary audio track out as mono 16 kHz Opus (~120 KB per minute), which is plenty for speech recognition.
  * Returns the audio plus its offset on the video timeline, since the conversion starts the output at 0.
  */
 export async function extractAudio(file: File, onProgress: (progress: number) => void): Promise<{ audio: Blob; offset: number }> {
@@ -14,13 +17,15 @@ export async function extractAudio(file: File, onProgress: (progress: number) =>
   try {
     const track = await input.getPrimaryAudioTrack();
     if (!track) throw new Error("Deze video heeft geen audiospoor.");
+    // Check before the slow extraction, not after it when the server refuses the upload.
+    if ((await track.computeDuration()) > MAX_SECONDS) throw new Error("Transcriberen kan tot 30 minuten video; deze is langer.");
     const target = new BufferTarget();
     const conversion = await Conversion.init({
       input,
       output: new Output({ format: new WebMOutputFormat(), target }),
       tracks: "primary",
       video: { discard: true },
-      audio: { codec: "opus", numberOfChannels: 1, sampleRate: 16000, bitrate: 32_000 },
+      audio: { codec: "opus", numberOfChannels: 1, sampleRate: 16000, bitrate: 16_000 },
       showWarnings: false,
     });
     if (!conversion.isValid) {

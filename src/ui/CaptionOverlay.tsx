@@ -137,6 +137,8 @@ export function CaptionOverlay({
         <div
           title="Klik om te selecteren, sleep om te verplaatsen"
           onPointerDown={startDrag}
+          // Select first, so the context menu acts on this caption and not on the one selected elsewhere.
+          onContextMenu={() => editing.onSelect(hit.groupId)}
           className={`pointer-events-auto absolute cursor-move rounded-md border-2 transition-colors ${
             selectedGroup ? "border-flits" : "border-transparent hover:border-white/70"
           }`}

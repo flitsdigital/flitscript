@@ -1,8 +1,10 @@
+import { memo } from "react";
 import type { VideoMeta } from "../media/probe";
 import { formatBitrate, formatBytes, formatTime } from "./format";
 import { Card } from "./kit";
 
-export function MetaPanel({ meta }: { meta: VideoMeta }) {
+// Memo: the editor re-renders every video frame; the metadata never changes with it.
+export const MetaPanel = memo(function MetaPanel({ meta }: { meta: VideoMeta }) {
   const { timing, colorSpace, audio } = meta;
   const sections: [string, [string, string][]][] = [
     [
@@ -52,4 +54,4 @@ export function MetaPanel({ meta }: { meta: VideoMeta }) {
       </div>
     </div>
   );
-}
+});

@@ -16,6 +16,8 @@ export type VideoMeta = {
   timing: FrameTiming;
   frameCount: number;
   duration: number;
+  /** First timestamp of the tracks an export keeps (primary video and audio); exports and subtitles start here at 0. */
+  startTime: number;
   videoBitrate: number;
   totalBitrate: number;
   hdr: boolean;
@@ -39,8 +41,9 @@ export async function probe(file: File): Promise<VideoMeta> {
       timestamps.push(packet.timestamp);
     }
 
-    const [duration, stats, codecString, canDecode, hdr, colorSpace] = await Promise.all([
+    const [duration, startTime, stats, codecString, canDecode, hdr, colorSpace] = await Promise.all([
       input.computeDuration(),
+      input.getFirstTimestamp(audio ? [video, audio] : [video]),
       video.computePacketStats(),
       video.getCodecParameterString(),
       video.canDecode(),
@@ -62,6 +65,7 @@ export async function probe(file: File): Promise<VideoMeta> {
       timing: summarizeFrameTiming(timestamps),
       frameCount: timestamps.length,
       duration,
+      startTime: Math.max(0, startTime),
       videoBitrate: stats.averageBitrate,
       totalBitrate: (file.size * 8) / duration,
       hdr,

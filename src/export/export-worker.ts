@@ -22,10 +22,10 @@ self.onmessage = async (event: MessageEvent<ExportRequest | { type: "cancel" }>)
     await run(event.data, file);
     post({ type: "done" });
   } catch (error) {
-    // Once Mediabunny owns the stream, cancelling closes it through `fileSink`, which discards instead of committing.
-    // Before that (a font that won't load) the stream is still ours to abort.
-    if (output) await output.cancel().catch(() => {});
-    else await file?.abort().catch(() => {});
+    // Once Mediabunny has started writing, cancelling closes the stream through `fileSink`, which discards instead of
+    // committing. Before `execute()` it never touched the stream, so abort it as well; a second abort just rejects.
+    await output?.cancel().catch(() => {});
+    await file?.abort().catch(() => {});
     if (canceled || error instanceof ConversionCanceledError) post({ type: "canceled" });
     else post({ type: "error", message: error instanceof Error ? error.message : String(error) });
   }
@@ -56,7 +56,7 @@ async function run(request: ExportRequest, file: FileSystemWritableFileStream) {
     target: new StreamTarget(fileSink(file), { chunked: true }),
   });
   // Conversion re-times output from the first timestamp; captions live on the source timeline.
-  const offset = Math.max(0, await input.getFirstTimestamp());
+  const offset = request.startTime;
   const size = { width: request.width, height: request.height };
   const canvas = new OffscreenCanvas(size.width, size.height);
   const ctx = canvas.getContext("2d")!;

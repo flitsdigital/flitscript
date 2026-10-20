@@ -23,7 +23,8 @@ export type Command =
   | { type: "replaceWord"; find: string; replace: string };
 
 /** Dutch (and English) hesitation sounds that never belong in captions. */
-const FILLERS = new Set(["eh", "ehm", "ehh", "euh", "uh", "uhm", "uhh", "um", "umm", "hm", "hmm", "mm", "mmm", "ehmm"]);
+// No "mm": it is also the unit in "12 mm".
+const FILLERS = new Set(["eh", "ehm", "ehh", "euh", "uh", "uhm", "uhh", "um", "umm", "hm", "hmm", "mmm", "ehmm"]);
 
 const splitPunctuation = (text: string) => {
   const m = /^([^\p{L}\p{N}]*)(.*?)([^\p{L}\p{N}]*)$/u.exec(text)!;
@@ -81,7 +82,7 @@ function nextId(prefix: string, used: Iterable<string>, offset = 0): string {
 const limitsChanged = (a: StylePreset, b: StylePreset) =>
   a.maxWordsPerGroup !== b.maxWordsPerGroup || a.maxCharsPerLine !== b.maxCharsPerLine || a.maxLines !== b.maxLines;
 
-/** Cuts words into blocks with ids the project never used, so a selection can't silently move to another block. */
+/** Cuts words into blocks with ids not in use. Ids are "highest + 1", so a deleted block's id can return; the editor drops stale selections. */
 function segmentFresh(project: Project, words: Word[], style: StylePreset): CaptionGroup[] {
   const used = project.groups.map((g) => g.id);
   return segmentWords(words, style).map((g, i) => ({ ...g, id: nextId("g", used, i) }));

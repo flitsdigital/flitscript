@@ -28,9 +28,7 @@ export async function POST(request: Request): Promise<Response> {
         ? "ANTHROPIC_API_KEY ontbreekt of is ongeldig op de server."
         : error instanceof Anthropic.RateLimitError
           ? "Te veel verzoeken bij Claude; probeer het zo opnieuw."
-          : error instanceof Error
-            ? error.message
-            : String(error);
+          : "onbekende fout (zie serverlog).";
     return Response.json({ error: `AI-correctie mislukt: ${message}` }, { status: 502 });
   }
 }

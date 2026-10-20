@@ -1,5 +1,5 @@
 import { Captions, Eraser, LoaderCircle, Merge, Plus, RefreshCw, Search, Sparkles, Trash, X } from "lucide-react";
-import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { findMatches, isFiller, type Command } from "../project/commands";
 import { groupWords } from "../project/model";
 import { findActiveIndex, showTime } from "../project/timing";
@@ -32,6 +32,7 @@ type Props = {
 
 export function CaptionsPanel({ file, duration, onAddCaption, initialGlossary, onGlossary, project, run, time, selectedId, onSelect, onSeek }: Props) {
   const [glossary, setGlossary] = useState(initialGlossary.join(", "));
+  const savedGlossary = useRef(initialGlossary.join(", "));
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   // Only right after transcribing: the panel stays mounted while hidden, so a plain entrance would replay on every tab switch.
   const [revealing, setRevealing] = useState(false);
@@ -40,7 +41,8 @@ export function CaptionsPanel({ file, duration, onAddCaption, initialGlossary, o
   const busy = status.kind === "busy";
   const [search, setSearch] = useState<{ find: string; replace: string } | null>(null);
   const matches = search ? findMatches(project.words, search.find).length : 0;
-  const fillers = project.words.filter((w) => isFiller(w.text));
+  // Memo: this panel re-renders every video frame (`time`), and the check runs a regex per word.
+  const fillers = useMemo(() => project.words.filter((w) => isFiller(w.text)), [project.words]);
 
   useEffect(() => {
     if (activeId) listRef.current?.querySelector(`[data-group="${activeId}"]`)?.scrollIntoView({ block: "nearest" });
@@ -70,7 +72,12 @@ export function CaptionsPanel({ file, duration, onAddCaption, initialGlossary, o
         type="text"
         value={glossary}
         onChange={(e) => setGlossary(e.target.value)}
-        onBlur={() => terms().join(", ") !== initialGlossary.join(", ") && onGlossary(terms())}
+        onBlur={() => {
+          const next = terms().join(", ");
+          if (next === savedGlossary.current) return;
+          savedGlossary.current = next;
+          onGlossary(terms());
+        }}
         placeholder="Flits Digital, AdBlue, Lelystad"
         className={fieldClass}
       />
