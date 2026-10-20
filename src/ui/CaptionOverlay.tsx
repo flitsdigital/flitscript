@@ -4,7 +4,8 @@ import { createPortal } from "react-dom";
 import { captionBoxAt, renderCaptions, type Rect } from "../captions/render";
 import { effectiveStyle } from "../captions/style";
 import type { StyleScope } from "../project/commands";
-import type { Project, StyleOverride, StylePreset } from "../project/types";
+import { groupWords } from "../project/model";
+import type { CaptionGroup, Project, StyleOverride, StylePreset, Word } from "../project/types";
 import { ColorPicker } from "./ColorPicker";
 
 export type OverlayEditing = {
@@ -15,6 +16,7 @@ export type OverlayEditing = {
   /** Applies a style change to all captions or to this block only, depending on `scope`. */
   onPatch: (groupId: string, patch: StyleOverride, gesture?: string) => void;
   onResetGroup: (groupId: string) => void;
+  onToggleAccent: (groupId: string, wordId: string) => void;
 };
 
 type Size = { width: number; height: number };
@@ -121,7 +123,7 @@ export function CaptionOverlay({
 
   const selectedGroup = hit && project?.groups.find((g) => g.id === hit.groupId && g.id === editing.selectedId);
   const style = selectedGroup && project ? effectiveStyle(project.style, selectedGroup) : null;
-  const below = hit && size ? hit.box.y + hit.box.height + 56 < size.height : true;
+  const below = hit && size ? hit.box.y + hit.box.height + 96 < size.height : true;
 
   return (
     <div ref={rootRef} className="pointer-events-none absolute inset-0">
@@ -153,9 +155,9 @@ export function CaptionOverlay({
         createPortal(
           <CaptionToolbar
             style={style}
-            hasOverride={!!selectedGroup.override}
+            words={groupWords(project!.words, selectedGroup)}
             editing={editing}
-            groupId={selectedGroup.id}
+            group={selectedGroup}
             position={{
               left: rootRef.current.getBoundingClientRect().left + hit.box.x + hit.box.width / 2,
               top: rootRef.current.getBoundingClientRect().top + (below ? hit.box.y + hit.box.height + 8 : hit.box.y - 8),
@@ -170,59 +172,78 @@ export function CaptionOverlay({
 
 function CaptionToolbar({
   style,
-  hasOverride,
+  words,
   editing,
-  groupId,
+  group,
   position,
   above,
 }: {
   style: StylePreset;
-  hasOverride: boolean;
+  words: Word[];
   editing: OverlayEditing;
-  groupId: string;
+  group: CaptionGroup;
   position: { left: number; top: number };
   above: boolean;
 }) {
+  const groupId = group.id;
   const patch = (p: StyleOverride, gesture?: string) => editing.onPatch(groupId, p, gesture);
   // Only the size: a block that is just bigger keeps following the project's font family.
   const size = (delta: number) => patch({ font: { size: Math.min(0.12, Math.max(0.015, +(style.font.size + delta).toFixed(4))) } }, "size");
   return (
     <div
       onPointerDown={(e) => e.stopPropagation()}
-      className={`pointer-events-auto fixed z-20 flex -translate-x-1/2 items-center gap-1 rounded-xl bg-white p-1 text-ink shadow-lg ring-1 ring-black/10 ${above ? "-translate-y-full" : ""}`}
+      className={`pointer-events-auto fixed z-20 flex -translate-x-1/2 flex-col gap-1 rounded-xl bg-white p-1 text-ink shadow-lg ring-1 ring-black/10 ${above ? "-translate-y-full" : ""}`}
       style={position}
     >
-      <div className="flex rounded-lg bg-neutral-100 p-0.5 text-xs font-medium">
-        {(["all", "group"] as const).map((s) => (
+      <div className="flex items-center gap-1">
+        <div className="flex rounded-lg bg-neutral-100 p-0.5 text-xs font-medium">
+          {(["all", "group"] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => editing.onScope(s)}
+              className={`rounded-md px-2 py-1 whitespace-nowrap ${editing.scope === s ? "bg-white shadow-sm" : "text-neutral-500 hover:text-ink"}`}
+            >
+              {s === "all" ? "Alle captions" : "Alleen deze"}
+            </button>
+          ))}
+        </div>
+        <span className="mx-0.5 h-5 w-px bg-neutral-200" />
+        <ToolButton label="Kleiner" onClick={() => size(-0.002)}>
+          <Minus size={14} />
+        </ToolButton>
+        <span className="w-9 text-center text-xs tabular-nums">{(style.font.size * 100).toFixed(1)}</span>
+        <ToolButton label="Groter" onClick={() => size(0.002)}>
+          <Plus size={14} />
+        </ToolButton>
+        <span className="mx-0.5 h-5 w-px bg-neutral-200" />
+        <ColorPicker variant="swatch" label="Tekstkleur" value={style.textColor} onChange={(textColor) => patch({ textColor }, "textColor")} />
+        <ColorPicker variant="swatch" label="Accentkleur" value={style.accentColors[0] ?? style.textColor} onChange={(c) => patch({ accentColors: [c, ...style.accentColors.slice(1)] }, "accent")} />
+        {!!group.override && (
+          <>
+            <span className="mx-0.5 h-5 w-px bg-neutral-200" />
+            <ToolButton label="Eigen stijl van deze caption wissen" onClick={() => editing.onResetGroup(groupId)}>
+              <RotateCcw size={14} />
+            </ToolButton>
+          </>
+        )}
+      </div>
+      {/* Its own row, sized to the controls above (w-0 min-w-full) so a long caption wraps instead of widening the bar. */}
+      <div className="flex w-0 min-w-full flex-wrap gap-0.5 border-t border-neutral-100 pt-1">
+        {words.map((w) => (
           <button
-            key={s}
+            key={w.id}
             type="button"
-            onClick={() => editing.onScope(s)}
-            className={`rounded-md px-2 py-1 whitespace-nowrap ${editing.scope === s ? "bg-white shadow-sm" : "text-neutral-500 hover:text-ink"}`}
+            title="Accent aan/uit"
+            onClick={() => editing.onToggleAccent(groupId, w.id)}
+            className={`rounded-md px-1.5 py-1 text-xs whitespace-nowrap transition-colors ${
+              group.accentWordIds.includes(w.id) ? "bg-ink font-semibold text-flits" : "text-neutral-600 hover:bg-neutral-100 hover:text-ink"
+            }`}
           >
-            {s === "all" ? "Alle captions" : "Alleen deze"}
+            {w.text}
           </button>
         ))}
       </div>
-      <span className="mx-0.5 h-5 w-px bg-neutral-200" />
-      <ToolButton label="Kleiner" onClick={() => size(-0.002)}>
-        <Minus size={14} />
-      </ToolButton>
-      <span className="w-9 text-center text-xs tabular-nums">{(style.font.size * 100).toFixed(1)}</span>
-      <ToolButton label="Groter" onClick={() => size(0.002)}>
-        <Plus size={14} />
-      </ToolButton>
-      <span className="mx-0.5 h-5 w-px bg-neutral-200" />
-      <ColorPicker variant="swatch" label="Tekstkleur" value={style.textColor} onChange={(textColor) => patch({ textColor }, "textColor")} />
-      <ColorPicker variant="swatch" label="Accentkleur" value={style.accentColors[0] ?? style.textColor} onChange={(c) => patch({ accentColors: [c, ...style.accentColors.slice(1)] }, "accent")} />
-      {hasOverride && (
-        <>
-          <span className="mx-0.5 h-5 w-px bg-neutral-200" />
-          <ToolButton label="Eigen stijl van deze caption wissen" onClick={() => editing.onResetGroup(groupId)}>
-            <RotateCcw size={14} />
-          </ToolButton>
-        </>
-      )}
     </div>
   );
 }

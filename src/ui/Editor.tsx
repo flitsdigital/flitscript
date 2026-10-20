@@ -1,4 +1,4 @@
-import { ArrowLeft, Captions, Check, CloudOff, Download, Info, LoaderCircle, Palette, Redo2, Replace, Undo2 } from "lucide-react";
+import { ArrowLeft, Captions, Check, CloudOff, Download, Info, LoaderCircle, Palette, PanelBottom, PanelRight, Redo2, Replace, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { addCustomFont, ensureFont, useFontFamilies } from "../captions/fonts";
 import { usedFonts } from "../captions/style";
@@ -57,6 +57,8 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [scope, setScope] = useState<StyleScope>("all");
+  const [videoRight, setVideoRight] = useState(() => localStorage.getItem("flitscript:layout") === "video-right");
+  useEffect(() => localStorage.setItem("flitscript:layout", videoRight ? "video-right" : "default"), [videoRight]);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [autosave] = useState(() =>
     createAutosave(async (data: Project) => void (await updateProject(projectId, { data })), opened.data, setSaveState, SAVE_DELAY_MS),
@@ -215,6 +217,10 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
   );
   const clearAccents = useCallback(() => run({ type: "clearAccents" }), [run]);
 
+  // With the video on the right there's room for captions next to style (or source), so only that second column switches.
+  const shown = (id: PanelId) => (videoRight ? id === "captions" || (id === "source") === (panel === "source") : panel === id);
+  const panelClass = (id: PanelId) => (!shown(id) ? "hidden" : videoRight && id !== "captions" ? "h-full w-[400px] shrink-0 border-l border-neutral-200" : "h-full min-w-0 flex-1");
+
   const editing: OverlayEditing = {
     selectedId,
     onSelect: setSelectedId,
@@ -225,6 +231,7 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
       run(change.command, change.gesture);
     },
     onResetGroup: (groupId) => run({ type: "setGroupStyle", groupId, style: null }),
+    onToggleAccent: (groupId, wordId) => run({ type: "toggleAccent", groupId, wordId }),
   };
 
   const target = project.groups.find((g) => g.id === selectedId) ?? project.groups[findActiveIndex(project.groups, time)];
@@ -253,82 +260,101 @@ export function Editor({ opened, onExit }: { opened: OpenedProject; onExit: () =
         <button type="button" title="Terug naar projecten" onClick={() => void exit()} className="mb-3 rounded-xl transition-opacity hover:opacity-80">
           <span className="flex size-9 items-center justify-center rounded-xl bg-ink text-[15px] font-black text-flits">F</span>
         </button>
-        <RailItem icon={<Captions size={18} />} label="Ondertitels" active={panel === "captions"} onClick={() => setPanel("captions")} />
-        <RailItem icon={<Palette size={18} />} label="Stijl" active={panel === "style"} onClick={() => setPanel("style")} />
+        {!videoRight && <RailItem icon={<Captions size={18} />} label="Ondertitels" active={panel === "captions"} onClick={() => setPanel("captions")} />}
+        <RailItem icon={<Palette size={18} />} label="Stijl" active={videoRight ? panel !== "source" : panel === "style"} onClick={() => setPanel("style")} />
         <RailItem icon={<Info size={18} />} label="Bron" active={panel === "source"} onClick={() => setPanel("source")} />
       </nav>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1">
-          <aside className="w-[360px] shrink-0 overflow-hidden border-r border-neutral-200 bg-white">
-            {/* Panels stay mounted so a running transcription and the glossary survive switching tabs. */}
-            <div className={panel === "captions" ? "h-full" : "hidden"}>
-              <CaptionsPanel
-                file={source.file}
-                duration={source.meta.duration}
-                onAddCaption={addCaption}
-                project={project}
-                run={run}
-                time={time}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-                onSeek={seek}
-                initialGlossary={opened.client?.glossary ?? []}
-                onGlossary={(terms) => clientId && void saveGlossary(clientId, terms).catch((e) => setError(String(e)))}
-              />
-            </div>
-            <div className={panel === "style" ? "h-full" : "hidden"}>
-              <StylePanel
-                style={project.style}
-                onStyle={setStyle}
-                customPresets={customPresets}
-                onSavePreset={savePresetAs}
-                onDeletePreset={removePreset}
-                onUploadFont={uploadClientFont}
-                onClearAccents={clearAccents}
-              />
-            </div>
-            <div className={panel === "source" ? "h-full" : "hidden"}>
-              <MetaPanel meta={source.meta} />
-            </div>
-          </aside>
-
-          <main className="flex min-w-0 flex-1 flex-col">
-            <header className="flex h-14 shrink-0 items-center gap-2 px-4">
-              <IconButton label="Terug naar projecten" onClick={() => void exit()}>
-                <ArrowLeft size={16} />
+      {/* One grid for both layouts: switching only moves areas around, so the video element is never remounted. */}
+      <div
+        className="grid min-w-0 flex-1"
+        style={
+          videoRight
+            ? {
+                gridTemplateAreas: `"header main" "aside main" "timeline main"`,
+                // Wide enough for the video at full height (minus preview padding and the safe-zone bar), capped at half the screen.
+                gridTemplateColumns: `minmax(0, 1fr) min(50%, calc((100dvh - 88px) * ${source.meta.width / source.meta.height} + 48px))`,
+                gridTemplateRows: "auto minmax(0, 1fr) auto",
+              }
+            : {
+                gridTemplateAreas: `"aside header" "aside main" "timeline timeline"`,
+                gridTemplateColumns: "360px minmax(0, 1fr)",
+                gridTemplateRows: "auto minmax(0, 1fr) auto",
+              }
+        }
+      >
+        <div style={{ gridArea: "header" }}>
+          <header className="flex h-14 shrink-0 items-center gap-2 px-4">
+            <IconButton label="Terug naar projecten" onClick={() => void exit()}>
+              <ArrowLeft size={16} />
+            </IconButton>
+            <span className="truncate font-medium">{opened.name}</span>
+            {opened.client && <span className="shrink-0 rounded-md bg-neutral-200/70 px-1.5 py-0.5 text-xs text-neutral-600">{opened.client.name}</span>}
+            <SaveIndicator state={saveState} onRetry={() => void autosave.flush()} />
+            <div className="ml-auto flex items-center gap-1">
+              <IconButton label="Ongedaan maken (⌘Z)" disabled={!history.past.length} onClick={() => dispatch({ type: "undo" })}>
+                <Undo2 size={16} />
               </IconButton>
-              <span className="truncate font-medium">{opened.name}</span>
-              {opened.client && <span className="shrink-0 rounded-md bg-neutral-200/70 px-1.5 py-0.5 text-xs text-neutral-600">{opened.client.name}</span>}
-              <SaveIndicator state={saveState} onRetry={() => void autosave.flush()} />
-              <div className="ml-auto flex items-center gap-1">
-                <IconButton label="Ongedaan maken (⌘Z)" disabled={!history.past.length} onClick={() => dispatch({ type: "undo" })}>
-                  <Undo2 size={16} />
-                </IconButton>
-                <IconButton label="Opnieuw (⌘⇧Z)" disabled={!history.future.length} onClick={() => dispatch({ type: "redo" })}>
-                  <Redo2 size={16} />
-                </IconButton>
-                <span className="mx-1 h-5 w-px bg-neutral-200" />
-                <Button variant="secondary" icon={<Replace size={15} />} onClick={() => void replaceVideo()}>
-                  Video vervangen
-                </Button>
-                <Button variant="primary" icon={<Download size={15} />} disabled={!renderable} onClick={() => setExporting(true)}>
-                  Exporteren
-                </Button>
-              </div>
-            </header>
-            {(error ?? fontError) && <p className="enter mx-4 rounded-lg bg-red-50 px-3 py-2 text-red-700">{error ?? fontError}</p>}
-            {notice && <p className="enter mx-4 rounded-lg bg-orange-50 px-3 py-2 text-orange-800">{notice}</p>}
-            <EditorMenu actions={menu}>
-              <div className="flex min-h-0 flex-1 flex-col">
-                {url && <Preview key={url} src={url} meta={source.meta} videoRef={videoRef} onTime={setTime} onPlaying={setPlaying} project={renderable} editing={editing} />}
-              </div>
-            </EditorMenu>
-          </main>
+              <IconButton label="Opnieuw (⌘⇧Z)" disabled={!history.future.length} onClick={() => dispatch({ type: "redo" })}>
+                <Redo2 size={16} />
+              </IconButton>
+              <IconButton label={videoRight ? "Standaard layout" : "Video groot rechts"} onClick={() => setVideoRight(!videoRight)}>
+                {videoRight ? <PanelBottom size={16} /> : <PanelRight size={16} />}
+              </IconButton>
+              <span className="mx-1 h-5 w-px bg-neutral-200" />
+              <Button variant="secondary" icon={<Replace size={15} />} onClick={() => void replaceVideo()}>
+                Video vervangen
+              </Button>
+              <Button variant="primary" icon={<Download size={15} />} disabled={!renderable} onClick={() => setExporting(true)}>
+                Exporteren
+              </Button>
+            </div>
+          </header>
+          {(error ?? fontError) && <p className="enter mx-4 rounded-lg bg-red-50 px-3 py-2 text-red-700">{error ?? fontError}</p>}
+          {notice && <p className="enter mx-4 rounded-lg bg-orange-50 px-3 py-2 text-orange-800">{notice}</p>}
         </div>
 
+        <aside style={{ gridArea: "aside" }} className={`flex min-h-0 overflow-hidden bg-white ${videoRight ? "" : "border-r border-neutral-200"}`}>
+          {/* Panels stay mounted so a running transcription and the glossary survive switching tabs. */}
+          <div className={panelClass("captions")}>
+            <CaptionsPanel
+              file={source.file}
+              duration={source.meta.duration}
+              onAddCaption={addCaption}
+              project={project}
+              run={run}
+              time={time}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onSeek={seek}
+              initialGlossary={opened.client?.glossary ?? []}
+              onGlossary={(terms) => clientId && void saveGlossary(clientId, terms).catch((e) => setError(String(e)))}
+            />
+          </div>
+          <div className={panelClass("style")}>
+            <StylePanel
+              style={project.style}
+              onStyle={setStyle}
+              customPresets={customPresets}
+              onSavePreset={savePresetAs}
+              onDeletePreset={removePreset}
+              onUploadFont={uploadClientFont}
+              onClearAccents={clearAccents}
+            />
+          </div>
+          <div className={panelClass("source")}>
+            <MetaPanel meta={source.meta} />
+          </div>
+        </aside>
+
         <EditorMenu actions={menu}>
-          <div>
+          <main style={{ gridArea: "main" }} className={`flex min-h-0 min-w-0 flex-col ${videoRight ? "border-l border-neutral-200" : ""}`}>
+            {url && <Preview key={url} src={url} meta={source.meta} videoRef={videoRef} onTime={setTime} onPlaying={setPlaying} project={renderable} editing={editing} />}
+          </main>
+        </EditorMenu>
+
+        <EditorMenu actions={menu}>
+          <div style={{ gridArea: "timeline" }} className="min-w-0">
             {/* Only with a url: a first mount without it would decode thumbnails and waveform once more for nothing. */}
             {url && (
               <Timeline
