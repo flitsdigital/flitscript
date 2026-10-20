@@ -4,13 +4,16 @@ import { ANIMATIONS } from "../captions/animations";
 import { addCustomFont, ensureFont, nearestWeight, useFontFamilies } from "../captions/fonts";
 import { PRESETS } from "../captions/presets";
 import type { AnimationId, StylePreset } from "../project/types";
+import { ColorPicker } from "./ColorPicker";
 import { Button, Card, fieldClass, IconButton, Segmented, Slider, Switch } from "./kit";
 
 type Props = {
   style: StylePreset;
   onStyle: (style: StylePreset, gesture?: string) => void;
   customPresets: StylePreset[];
-  onCustomPresets: (presets: StylePreset[]) => void;
+  onSavePreset: (name: string) => Promise<void>;
+  onDeletePreset: (id: string) => Promise<void>;
+  onFontUploaded: (file: File, family: string) => void;
   onClearAccents: () => void;
 };
 
@@ -18,11 +21,8 @@ type Tab = "text" | "effect" | "animation";
 
 const WEIGHT_NAMES: Record<number, string> = { 400: "Regular", 500: "Medium", 600: "Semibold", 700: "Bold", 800: "Extrabold", 900: "Black" };
 
-/** Colours are stored as #RRGGBB(AA); the colour input only edits the first six digits. */
-const splitHex = (hex: string): [string, number] => [hex.slice(0, 7), hex.length === 9 ? parseInt(hex.slice(7), 16) / 255 : 1];
-const joinHex = (rgb: string, alpha: number) => (alpha >= 1 ? rgb : `${rgb}${Math.round(alpha * 255).toString(16).padStart(2, "0")}`);
 
-export function StylePanel({ style, onStyle, customPresets, onCustomPresets, onClearAccents }: Props) {
+export function StylePanel({ style, onStyle, customPresets, onSavePreset, onDeletePreset, onFontUploaded, onClearAccents }: Props) {
   const families = useFontFamilies();
   const [tab, setTab] = useState<Tab>("text");
   const [fontError, setFontError] = useState<string | null>(null);
@@ -42,18 +42,21 @@ export function StylePanel({ style, onStyle, customPresets, onCustomPresets, onC
     try {
       const family = await addCustomFont(file);
       set({ font: { ...style.font, family, weight: 400 } });
+      onFontUploaded(file, family);
     } catch {
       setFontError("Dit bestand is geen geldig lettertype (.ttf, .otf, .woff of .woff2).");
     }
   }
 
-  function savePreset() {
+  async function savePreset() {
     const name = naming?.trim();
     setNaming(null);
     if (!name) return;
-    const preset = { ...style, id: `custom-${Date.now()}`, name };
-    onCustomPresets([...customPresets, preset]);
-    onStyle(preset);
+    try {
+      await onSavePreset(name);
+    } catch (e) {
+      setFontError(`Preset niet opgeslagen: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   return (
@@ -73,7 +76,7 @@ export function StylePanel({ style, onStyle, customPresets, onCustomPresets, onC
               Opslaan als preset
             </Button>
             {style.id.startsWith("custom-") && (
-              <IconButton label="Preset verwijderen" className="ring-1 ring-neutral-200" onClick={() => onCustomPresets(customPresets.filter((p) => p.id !== style.id))}>
+              <IconButton label="Preset verwijderen" className="ring-1 ring-neutral-200" onClick={() => void onDeletePreset(style.id).catch((e) => setFontError(`Preset niet verwijderd: ${String(e)}`))}>
                 <Trash size={15} />
               </IconButton>
             )}
@@ -83,7 +86,7 @@ export function StylePanel({ style, onStyle, customPresets, onCustomPresets, onC
             className="flex gap-2"
             onSubmit={(e) => {
               e.preventDefault();
-              savePreset();
+              void savePreset();
             }}
           >
             <input autoFocus type="text" aria-label="Naam van de preset" className={fieldClass} value={naming} onChange={(e) => setNaming(e.target.value)} />
@@ -93,6 +96,7 @@ export function StylePanel({ style, onStyle, customPresets, onCustomPresets, onC
           </form>
         )}
 
+        {fontError && <p className="text-red-600">{fontError}</p>}
         <Segmented<Tab>
           value={tab}
           onChange={setTab}
@@ -132,7 +136,6 @@ export function StylePanel({ style, onStyle, customPresets, onCustomPresets, onC
                   <input ref={uploadRef} type="file" accept=".ttf,.otf,.woff,.woff2" className="hidden" onChange={(e) => void upload(e.target.files?.[0])} />
                 </div>
               </Field>
-              {fontError && <p className="text-red-600">{fontError}</p>}
               <Field label="Dikte">
                 <select className={fieldClass} value={style.font.weight} onChange={(e) => set({ font: { ...style.font, weight: Number(e.target.value) } })}>
                   {weights.map((w) => (
@@ -147,8 +150,8 @@ export function StylePanel({ style, onStyle, customPresets, onCustomPresets, onC
             </Card>
             <Card>
               <div className="grid grid-cols-2 gap-3">
-                <ColorField label="Tekst" value={style.textColor} onChange={(textColor) => set({ textColor }, "textColor")} />
-                <ColorField label="Accent" value={style.accentColors[0] ?? style.textColor} onChange={(c) => set({ accentColors: [c, ...style.accentColors.slice(1)] }, "accent")} />
+                <ColorPicker label="Tekst" value={style.textColor} onChange={(textColor) => set({ textColor }, "textColor")} />
+                <ColorPicker label="Accent" value={style.accentColors[0] ?? style.textColor} onChange={(c) => set({ accentColors: [c, ...style.accentColors.slice(1)] }, "accent")} />
               </div>
             </Card>
             <Card>
@@ -172,7 +175,7 @@ export function StylePanel({ style, onStyle, customPresets, onCustomPresets, onC
               />
               {style.accentBox && (
                 <>
-                  <ColorField label="Tekst op het blok" value={style.accentBox.textColor} onChange={(textColor) => set({ accentBox: { ...style.accentBox!, textColor } }, "boxText")} />
+                  <ColorPicker label="Tekst op het blok" value={style.accentBox.textColor} onChange={(textColor) => set({ accentBox: { ...style.accentBox!, textColor } }, "boxText")} />
                   <Slider label="Afronding" min={0} max={0.5} step={0.01} value={style.accentBox.radius} format={(v) => v.toFixed(2)} onChange={(radius) => set({ accentBox: { ...style.accentBox!, radius } }, "boxRadius")} />
                 </>
               )}
@@ -190,7 +193,7 @@ export function StylePanel({ style, onStyle, customPresets, onCustomPresets, onC
               <ToggleRow label="Rand" checked={!!style.stroke} onChange={(on) => set({ stroke: on ? { color: "#000000", width: 0.06 } : null })} />
               {style.stroke && (
                 <>
-                  <ColorField label="Kleur" value={style.stroke.color} onChange={(color) => set({ stroke: { ...style.stroke!, color } }, "strokeColor")} />
+                  <ColorPicker label="Kleur" value={style.stroke.color} onChange={(color) => set({ stroke: { ...style.stroke!, color } }, "strokeColor")} />
                   <Slider label="Dikte" min={0.01} max={0.15} step={0.005} value={style.stroke.width} format={(v) => v.toFixed(3)} onChange={(width) => set({ stroke: { ...style.stroke!, width } }, "strokeWidth")} />
                 </>
               )}
@@ -199,7 +202,7 @@ export function StylePanel({ style, onStyle, customPresets, onCustomPresets, onC
               <ToggleRow label="Schaduw" checked={!!style.shadow} onChange={(on) => set({ shadow: on ? { color: "#000000A6", blur: 0.3, offsetY: 0.06 } : null })} />
               {style.shadow && (
                 <>
-                  <ColorField label="Kleur" alpha value={style.shadow.color} onChange={(color) => set({ shadow: { ...style.shadow!, color } }, "shadowColor")} />
+                  <ColorPicker label="Kleur" alpha value={style.shadow.color} onChange={(color) => set({ shadow: { ...style.shadow!, color } }, "shadowColor")} />
                   <Slider label="Zachtheid" min={0} max={1} step={0.01} value={style.shadow.blur} format={(v) => v.toFixed(2)} onChange={(blur) => set({ shadow: { ...style.shadow!, blur } }, "shadowBlur")} />
                 </>
               )}
@@ -212,7 +215,7 @@ export function StylePanel({ style, onStyle, customPresets, onCustomPresets, onC
               />
               {style.background && (
                 <>
-                  <ColorField label="Kleur" alpha value={style.background.color} onChange={(color) => set({ background: { ...style.background!, color } }, "bgColor")} />
+                  <ColorPicker label="Kleur" alpha value={style.background.color} onChange={(color) => set({ background: { ...style.background!, color } }, "bgColor")} />
                   <Slider label="Ruimte" min={0} max={0.8} step={0.01} value={style.background.padding} format={(v) => v.toFixed(2)} onChange={(padding) => set({ background: { ...style.background!, padding } }, "bgPadding")} />
                   <Slider label="Afronding" min={0} max={0.8} step={0.01} value={style.background.radius} format={(v) => v.toFixed(2)} onChange={(radius) => set({ background: { ...style.background!, radius } }, "bgRadius")} />
                 </>
@@ -311,21 +314,6 @@ function ToggleRow({ label, checked, onChange }: { label: string; checked: boole
     <div className="flex items-center justify-between">
       <span className="font-medium">{label}</span>
       <Switch checked={checked} onChange={onChange} label={label} />
-    </div>
-  );
-}
-
-function ColorField({ label, value, onChange, alpha }: { label: string; value: string; onChange: (hex: string) => void; alpha?: boolean }) {
-  const [rgb, opacity] = splitHex(value);
-  return (
-    <div className="space-y-2">
-      <label className="flex cursor-pointer items-center gap-2">
-        <span className="size-7 rounded-md ring-1 ring-neutral-300" style={{ background: value }} />
-        <span className="text-neutral-600">{label}</span>
-        <span className="ml-auto font-mono text-xs text-neutral-400 uppercase">{rgb}</span>
-        <input type="color" value={rgb} onChange={(e) => onChange(joinHex(e.target.value, opacity))} className="sr-only" />
-      </label>
-      {alpha && <Slider label="Dekking" min={0} max={1} step={0.01} value={opacity} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => onChange(joinHex(rgb, v))} />}
     </div>
   );
 }

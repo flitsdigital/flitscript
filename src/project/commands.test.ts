@@ -204,3 +204,17 @@ describe("fillers and find/replace", () => {
     expect(apply(withFillers, { type: "replaceWord", find: "nope", replace: "x" })).toBe(withFillers);
   });
 });
+
+describe("setGroupTiming moves the words along", () => {
+  it("shifts and stretches the block's words proportionally", () => {
+    const roomy = apply(project, { type: "deleteGroup", groupId: "g0" }); // free space before the block
+    const g = roomy.groups[0]!; // "kan een vrachtauto": words w3..w5
+    const p = apply(roomy, { type: "setGroupTiming", groupId: g.id, start: g.start - 0.2, end: g.end });
+    const words = p.groups[0]!.wordIds.map((id) => p.words.find((w) => w.id === id)!);
+    expect(words[0]!.start).toBeCloseTo(g.start - 0.2);
+    expect(words.at(-1)!.end).toBeLessThanOrEqual(p.groups[0]!.end);
+    for (let i = 1; i < words.length; i++) expect(words[i]!.start).toBeGreaterThanOrEqual(words[i - 1]!.end - 1e-9);
+    // Words of other blocks stay put.
+    expect(p.words.find((w) => w.id === "w0")).toEqual(project.words[0]);
+  });
+});

@@ -1,3 +1,4 @@
+import { requireTeamMember } from "../server/auth";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { refine } from "../server/refine";
@@ -8,8 +9,9 @@ const inputSchema = z.object({
   glossary: z.array(z.string().max(100)).max(1000),
 });
 
-// TODO(fase 6): check the Supabase session here before this goes on a public URL.
 export async function POST(request: Request): Promise<Response> {
+  const denied = await requireTeamMember(request);
+  if (denied) return denied;
   const parsed = inputSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Ongeldige invoer." }, { status: 400 });
   const known = new Set(parsed.data.words.map((w) => w.id));

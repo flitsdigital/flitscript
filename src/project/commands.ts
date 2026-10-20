@@ -91,6 +91,31 @@ function reaccent(project: Project, rate: number): CaptionGroup[] {
   return project.groups.map((g, i) => ({ ...g, accentWordIds: picks[i]! }));
 }
 
+/**
+ * Moves or stretches a block and takes its words along proportionally, so per-word animations
+ * (word-by-word, karaoke, word pop) follow the block instead of waiting for the old word times.
+ */
+function retimeGroup(project: Project, groupId: string, wantStart: number, wantEnd: number): Project {
+  const i = project.groups.findIndex((g) => g.id === groupId);
+  const g = project.groups[i];
+  if (!g) return project;
+  // Blocks never overlap their neighbours and never get shorter than 0.1 s.
+  const min = project.groups[i - 1]?.end ?? 0;
+  const max = project.groups[i + 1]?.start ?? Infinity;
+  const start = Math.min(Math.max(wantStart, min), max - MIN_DURATION);
+  const end = Math.max(Math.min(wantEnd, max), start + MIN_DURATION);
+  if (start === g.start && end === g.end) return project;
+  const k = (end - start) / (g.end - g.start);
+  const map = (t: number) => Math.min(Math.max(start + (t - g.start) * k, start), end);
+  const ids = new Set(g.wordIds);
+  const words = project.words
+    .map((w) => (ids.has(w.id) ? { ...w, start: map(w.start), end: map(w.end) } : w))
+    .sort((a, b) => a.start - b.start);
+  const groups = [...project.groups];
+  groups[i] = { ...g, start, end };
+  return { ...project, words, groups };
+}
+
 function addGroup(project: Project, id: string, time: number, maxEnd: number): Project {
   if (project.groups.some((g) => time >= g.start && time < g.end)) return project;
   const next = project.groups.find((g) => g.start > time);
@@ -249,14 +274,7 @@ export function apply(project: Project, command: Command): Project {
           : [...g.accentWordIds, command.wordId],
       }));
     case "setGroupTiming":
-      return updateGroup(project, command.groupId, (g, i) => {
-        // Blocks never overlap their neighbours and never get shorter than 0.1 s.
-        const min = project.groups[i - 1]?.end ?? 0;
-        const max = project.groups[i + 1]?.start ?? Infinity;
-        const start = Math.min(Math.max(command.start, min), max - MIN_DURATION);
-        const end = Math.max(Math.min(command.end, max), start + MIN_DURATION);
-        return start === g.start && end === g.end ? g : { ...g, start, end };
-      });
+      return retimeGroup(project, command.groupId, command.start, command.end);
     case "splitGroup":
       return splitGroup(project, command.groupId, command.time);
     case "mergeWithNext": {

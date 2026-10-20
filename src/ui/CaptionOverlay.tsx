@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import { createPortal } from "react-dom";
 import { captionBoxAt, effectiveStyle, renderCaptions, type Rect } from "../captions/render";
 import type { Project, StylePreset } from "../project/types";
+import { ColorPicker } from "./ColorPicker";
 
 export type StyleScope = "all" | "group";
 
@@ -209,8 +210,8 @@ function CaptionToolbar({
         <Plus size={14} />
       </ToolButton>
       <span className="mx-0.5 h-5 w-px bg-neutral-200" />
-      <Swatch label="Tekstkleur" value={style.textColor} onChange={(textColor) => patch({ textColor }, "textColor")} />
-      <Swatch label="Accentkleur" value={style.accentColors[0] ?? style.textColor} onChange={(c) => patch({ accentColors: [c, ...style.accentColors.slice(1)] }, "accent")} />
+      <ColorPicker variant="swatch" label="Tekstkleur" value={style.textColor} onChange={(textColor) => patch({ textColor }, "textColor")} />
+      <ColorPicker variant="swatch" label="Accentkleur" value={style.accentColors[0] ?? style.textColor} onChange={(c) => patch({ accentColors: [c, ...style.accentColors.slice(1)] }, "accent")} />
       {hasOverride && (
         <>
           <span className="mx-0.5 h-5 w-px bg-neutral-200" />
@@ -228,15 +229,5 @@ function ToolButton({ label, onClick, children }: { label: string; onClick: () =
     <button type="button" title={label} aria-label={label} onClick={onClick} className="flex size-7 items-center justify-center rounded-md hover:bg-neutral-100">
       {children}
     </button>
-  );
-}
-
-function Swatch({ label, value, onChange }: { label: string; value: string; onChange: (hex: string) => void }) {
-  const alpha = value.length === 9 ? value.slice(7) : "";
-  return (
-    <label title={label} className="flex size-7 cursor-pointer items-center justify-center rounded-md hover:bg-neutral-100">
-      <span className="size-4 rounded-full ring-1 ring-black/20" style={{ background: value }} />
-      <input type="color" aria-label={label} value={value.slice(0, 7)} onChange={(e) => onChange(e.target.value + alpha)} className="sr-only" />
-    </label>
   );
 }

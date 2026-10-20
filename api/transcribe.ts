@@ -1,11 +1,13 @@
+import { requireTeamMember } from "../server/auth";
 import { elevenLabsProvider } from "../server/elevenlabs";
 import { sanitizeKeyterms } from "../server/transcription";
 
 // Vercel caps request bodies at 4.5 MB; Opus at 32 kbps fits ~15 minutes in this.
 const MAX_AUDIO_BYTES = 4 * 1024 * 1024;
 
-// TODO(fase 6): check the Supabase session here before this goes on a public URL.
 export async function POST(request: Request): Promise<Response> {
+  const denied = await requireTeamMember(request);
+  if (denied) return denied;
   let form: FormData;
   try {
     form = await request.formData();

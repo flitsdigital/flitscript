@@ -1,4 +1,5 @@
 import { ALL_FORMATS, BlobSource, BufferTarget, Conversion, Input, Output, WebMOutputFormat } from "mediabunny";
+import { authHeaders } from "../lib/supabase";
 import type { Word } from "../project/types";
 
 export type TranscribeProgress = { stage: "audio"; progress: number } | { stage: "transcribe" };
@@ -47,7 +48,7 @@ export async function transcribe(
   const form = new FormData();
   form.append("audio", audio, "audio.webm");
   for (const term of keyterms) form.append("keyterms", term);
-  const response = await fetch("/api/transcribe", { method: "POST", body: form });
+  const response = await fetch("/api/transcribe", { method: "POST", body: form, headers: await authHeaders() });
   const body = (await response.json().catch(() => ({}))) as { words?: Word[]; error?: string };
   if (!response.ok || !body.words) throw new Error(body.error ?? `Transcriptie mislukt (${response.status}).`);
 

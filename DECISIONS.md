@@ -159,3 +159,40 @@ De code staat nog klaar maar wordt niet gebruikt: `api/refine.ts`, `server/refin
 - Het exportvenster verwijdert het bestand bovendien bij elke export die niet afrondt.
 - Getest: annuleren op 37% laat 0 bytes achter; een normale export blijft 52,3 MB, met alle 1473 frames en de PCM-audio intact.
 - Audio-controle op de echte exports van de gebruiker (`Timeline 1-captions.mov`, `Timeline 1-caption2323s.mov`): de PCM-data is byte voor byte gelijk aan de bron (zelfde MD5), net als de audio- en videotijdstempels. Wat niet wordt meegekopieerd: het timecode-spoor (01:00:00:00) uit DaVinci Resolve.
+
+## 2026-10-17 — Opslag en login (fase 6)
+- Supabase-project `zpdpuhwoitzmsswkqdcl`. De Supabase-connector heeft geen toegang tot dat account; het schema staat daarom als migratie in `supabase/migrations/20261017000000_init.sql` en moet in de SQL-editor worden gedraaid.
+- Tabellen:
+  - `clients` (naam en glossary);
+  - `presets` (stijl-JSON, per klant of algemeen);
+  - `projects` (fingerprint, video-meta, caption-data als JSON);
+  - `fonts` (verwijzing naar een private storage-bucket `fonts`).
+  Geen video in Supabase.
+- Toegang: één RLS-policy per tabel. Iedereen die is ingelogd met @flitsdigital.nl mag alles; ieder ander ziet niets (`public.is_flits()` op het e-mailadres in de JWT). Als intern tool werkt het team samen aan alles.
+- Login: magic link via Supabase Auth, geen wachtwoord. De app weigert andere domeinen al vóór het versturen. Optioneel weigert hook `hook_flits_only_signup` ook het aanmaken van accounts (aanzetten in Authentication → Hooks).
+- `/api/transcribe` en `/api/refine` controleren de Supabase-sessie (`auth.getUser`) en het domein. Zonder geldige sessie volgt 401.
+- Projecten heropenen:
+  - Het bronbestand wordt herkend aan naam, grootte, duur en de SHA-256 van de eerste 4 MB.
+  - De `FileSystemFileHandle` wordt per project in IndexedDB bewaard, zodat heropenen één toestemmingsklik is.
+  - Mismatch: waarschuwing met de reden; doorgaan werkt de fingerprint bij.
+  - Bestand weg of geen toegang: een banner met een eigen "Bestand kiezen"-knop. De bestandskiezer heeft de klik-activatie nodig, dus niets traags vóór de picker.
+- Autosave 0,8 s na de laatste wijziging, met de status in de topbalk. Bij teruggaan wordt eerst opgeslagen; met onopgeslagen wijzigingen waarschuwt de browser bij sluiten.
+- Per klant: presets (stijl-id `custom-<uuid>`), geüploade fonts (bij openen gedownload en geregistreerd) en de glossary (opgeslagen bij verlaten van het veld).
+- Gekozen klant op het projectscherm wordt lokaal onthouden (localStorage, alleen gemak).
+- "Nieuwe video" in het contextmenu gaat nu terug naar het projectscherm.
+
+## 2026-10-17 — Eigen kleurkiezer
+- Het native `<input type="color">` opende in Chrome los van het veld (onderin het scherm) en werkte onhandig.
+- Vervangen door `ColorPicker`: een shadcn-popover naast het veld met `react-colorful` (±3 KB, geen dependencies). Erin:
+  - kleurvlak en kleurtoon;
+  - 10 snelle kleuren (Flits-kleuren en preset-accenten);
+  - hex-invoer;
+  - pipet (Chrome EyeDropper, ook om een kleur uit de video te pakken).
+- Voor schaduw en achtergrond zit de dekking (#RRGGBBAA) in de kiezer zelf; de aparte dekkingsschuif is weg. Een snelle kleur behoudt de dekking.
+- Dezelfde kiezer zit in het stijlpaneel en, als ronde knop, in de werkbalk op de video.
+
+## 2026-10-17 — Blokrand slepen neemt de woorden mee
+Eerder veranderde het slepen van een blokrand alleen de bloktijd; de woorden hielden hun oude tijden. Per-woord-animaties (woord voor woord, karaoke, woord-pop) toonden de tekst daardoor pas op het oude moment. Nu verdeelt `setGroupTiming` de woorden van het blok lineair over de nieuwe start en het nieuwe einde. Dit is een expliciete handmatige wijziging, dus het valt niet onder "geen tijden verzinnen" (dat geldt voor de AI).
+
+## 2026-10-20 — Captiontekst past live aan
+Elke toetsaanslag in het tekstveld gaat direct als `editGroupText` door, met gesture-key `text:<blok>`: een reeks typen is één undo-stap. Zolang het veld focus heeft houdt het een eigen waarde, zodat hergroeperen van woorden of spaties de cursor niet verspringt. Een tussentijds leeg veld (alles selecteren, dan typen) wordt overgeslagen; een leeg veld bij verlaten verwijdert het blok, zoals voorheen.

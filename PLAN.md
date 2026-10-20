@@ -1,6 +1,6 @@
 # Implementatieplan Flitscript
 
-Status: optie A. Fase 1–5 klaar (AI-correctie gebouwd maar uitgeschakeld). Open: HDR- en VFR-test met iPhone-bestanden, fase 6 (opslag + login), fase 7 (deploy).
+Status: optie A. Fase 1–6 gebouwd (fase 6 wacht op het draaien van de migratie in Supabase). Open: HDR- en VFR-test met iPhone-bestanden, fase 7 (deploy).
 
 ## 0. Bevindingen Toolcraft
 

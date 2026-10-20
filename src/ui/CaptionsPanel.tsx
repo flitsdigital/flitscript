@@ -13,16 +13,19 @@ type Props = {
   file: File;
   duration: number;
   onAddCaption: () => void;
+  /** The client's names and jargon; saved back when the field loses focus. */
+  initialGlossary: string[];
+  onGlossary: (terms: string[]) => void;
   project: Project;
-  run: (command: Command) => void;
+  run: (command: Command, gesture?: string) => void;
   time: number;
   selectedId: string | null;
   onSelect: (groupId: string) => void;
   onSeek: (time: number) => void;
 };
 
-export function CaptionsPanel({ file, duration, onAddCaption, project, run, time, selectedId, onSelect, onSeek }: Props) {
-  const [glossary, setGlossary] = useState("");
+export function CaptionsPanel({ file, duration, onAddCaption, initialGlossary, onGlossary, project, run, time, selectedId, onSelect, onSeek }: Props) {
+  const [glossary, setGlossary] = useState(initialGlossary.join(", "));
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const listRef = useRef<HTMLDivElement>(null);
   const index = useMemo(() => new Map(project.words.map((w) => [w.id, w])), [project.words]);
@@ -55,7 +58,14 @@ export function CaptionsPanel({ file, duration, onAddCaption, project, run, time
   const glossaryField = (
     <label className="block space-y-1.5">
       <span className="text-neutral-500">Vaktermen en namen</span>
-      <input type="text" value={glossary} onChange={(e) => setGlossary(e.target.value)} placeholder="Flits Digital, AdBlue, Lelystad" className={fieldClass} />
+      <input
+        type="text"
+        value={glossary}
+        onChange={(e) => setGlossary(e.target.value)}
+        onBlur={() => terms().join(", ") !== initialGlossary.join(", ") && onGlossary(terms())}
+        placeholder="Flits Digital, AdBlue, Lelystad"
+        className={fieldClass}
+      />
     </label>
   );
 
@@ -191,7 +201,7 @@ type RowProps = {
   active: boolean;
   selected: boolean;
   hasNext: boolean;
-  run: (command: Command) => void;
+  run: (command: Command, gesture?: string) => void;
   onSelect: (groupId: string) => void;
   onSeek: (time: number) => void;
   query: string;
@@ -229,7 +239,7 @@ const CaptionRow = memo(function CaptionRow({ group, index, active, selected, ha
       </div>
       {selected ? (
         <>
-          <TextField key={text} initial={text} onCommit={(value) => run({ type: "editGroupText", groupId: group.id, text: value })} />
+          <TextField text={text} onEdit={(value) => run({ type: "editGroupText", groupId: group.id, text: value }, `text:${group.id}`)} />
           <div className="mt-2 flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
             {words.map((w) => (
               <button
@@ -263,24 +273,34 @@ const CaptionRow = memo(function CaptionRow({ group, index, active, selected, ha
   );
 });
 
-function TextField({ initial, onCommit }: { initial: string; onCommit: (value: string) => void }) {
-  const [value, setValue] = useState(initial);
-  const commit = () => value !== initial && onCommit(value);
+/**
+ * Applies every keystroke straight away (one undo step per burst of typing). While focused it keeps its own
+ * value, so normalising spaces or regrouping words never moves the cursor; an emptied field deletes the block on blur.
+ */
+function TextField({ text, onEdit }: { text: string; onEdit: (value: string) => void }) {
+  const [value, setValue] = useState(text);
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focused.current) setValue(text);
+  }, [text]);
   return (
     <input
       type="text"
       aria-label="Captiontekst"
       value={value}
       onClick={(e) => e.stopPropagation()}
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-        if (e.key === "Escape") {
-          setValue(initial);
-          requestAnimationFrame(() => (e.target as HTMLInputElement).blur());
-        }
+      onFocus={() => (focused.current = true)}
+      onChange={(e) => {
+        setValue(e.target.value);
+        // Skip the empty in-between state (select all, then type) so the block isn't deleted mid-edit.
+        if (e.target.value.trim()) onEdit(e.target.value);
       }}
+      onBlur={() => {
+        focused.current = false;
+        if (!value.trim()) onEdit("");
+        else setValue(text);
+      }}
+      onKeyDown={(e) => (e.key === "Enter" || e.key === "Escape") && e.currentTarget.blur()}
       className="h-8 w-full rounded-md bg-white px-2 font-medium ring-1 ring-neutral-200 outline-none focus:ring-2 focus:ring-flits"
     />
   );
